@@ -139,6 +139,15 @@ struct RootView: View {
       for task in engine.tasks { task.tickSpeed() }
     }
     .onAppear { syncKeepAwake() }
+    .onOpenURL { url in
+      // 从「探索」页或别的 App 传来的下载请求
+      guard url.scheme == "thunderlite" else { return }
+      if let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
+         let target = comps.queryItems?.first(where: { $0.name == "url" })?.value {
+        try? engine.add(url: target, saveTo: prefs.saveDirectory(),
+                        threads: prefs.threads)
+      }
+    }
   }
 
   // MARK: 顶部标题栏

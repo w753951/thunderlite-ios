@@ -37,6 +37,6 @@ struct ThunderLiteApp: App {
 /// 全局根视图。单独抽出来，方便以后加引导页或状态注入。
 struct ThunderLiteRoot: View {
   var body: some View {
-    RootView()
+    MainContainerView()
   }
 }
