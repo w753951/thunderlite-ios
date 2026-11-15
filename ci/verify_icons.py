@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """检查 ipa 里的 App 图标能不能被 iOS 正常渲染。
 
-踩过的两个坑，都会让桌面只剩网格占位图：
+真正会让桌面只剩网格占位图的是这个：PNG 被 pngcrush 压成 CgBI 格式 ——
+IHDR 前面多插一个 CgBI 块。这是 Xcode 的 COMPRESS_PNG_FILES 干的，
+iOS 15 的 SpringBoard 解不开，于是画占位图。这条是硬失败。
 
-  1. PNG 带 alpha 通道（colortype 4/6，或调色板类型 3）。App 图标必须不透明，
-     iOS 会直接拒绝渲染。
-  2. PNG 被 pngcrush 压成 CgBI 格式 —— IHDR 前面多插一个 CgBI 块。这是
-     Xcode 的 COMPRESS_PNG_FILES 干的，iOS 15 的 SpringBoard 解不开。
+alpha 通道只作提示，不算失败：App Store 上架的 App，bundle 里的图标 PNG
+多数就是 RGBA（actool 从 Assets.car 反写出来的也是）。真正要求"不透明"
+的是提交给 App Store 的那张 1024 母版，不是运行时 bundle 里的这些。
 
 用法：python3 ci/verify_icons.py <path/to/ThunderLite.app>
 """
@@ -15,7 +16,7 @@ import struct
 import sys
 
 SIG = b"\x89PNG\r\n\x1a\n"
-OPAQUE_TYPES = {0: "Grayscale", 2: "RGB"}
+TYPE_NAMES = {0: "Grayscale", 2: "RGB", 3: "Palette", 4: "Gray+Alpha", 6: "RGBA"}
 
 
 def walk_chunks(data):
@@ -33,6 +34,7 @@ def walk_chunks(data):
 
 
 def check(path, name):
+    """返回 True 表示这张图没问题。CgBI 是硬失败。"""
     with open(path, "rb") as f:
         data = f.read()
 
@@ -44,8 +46,8 @@ def check(path, name):
     kinds = [c[0] for c in chunks]
 
     if "CgBI" in kinds:
-        print("::error title=icon::%s is CgBI-crushed; "
-              "iOS cannot decode it (set COMPRESS_PNG_FILES=NO)" % name)
+        print("::error title=icon::%s is CgBI-crushed; iOS cannot decode it "
+              "(set COMPRESS_PNG_FILES=NO)" % name)
         return False
 
     ihdr = next((c for c in chunks if c[0] == "IHDR"), None)
@@ -56,14 +58,9 @@ def check(path, name):
     _, off, _ = ihdr
     width, height = struct.unpack(">II", data[off:off + 8])
     colortype = data[off + 9]
-
-    if colortype in (3, 4, 6):
-        print("::error title=icon::%s has an alpha channel (colortype=%d); "
-              "app icons must be opaque" % (name, colortype))
-        return False
-
-    print("  ok %-28s %dx%-4d colortype=%d (%s)" % (
-        name, width, height, colortype, OPAQUE_TYPES[colortype]))
+    note = "  (has alpha, fine for runtime)" if colortype in (4, 6) else ""
+    print("  ok %-28s %dx%-4d %s%s" % (
+        name, width, height, TYPE_NAMES.get(colortype, str(colortype)), note))
     return True
 
 
@@ -103,3 +100,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
