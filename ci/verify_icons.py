@@ -94,6 +94,26 @@ def main():
         ok = False
     else:
         print("  ok Assets.car %d bytes" % os.path.getsize(car))
+        # car 里必须真的有可用的 AppIcon rendition，否则 SpringBoard 会画占位图。
+        # 只有一张 universal 的 1024 母版时，actool 不会产出设备档，car 是空的。
+        with open(car, "rb") as f:
+            blob = f.read()
+        if b"AppIcon" not in blob:
+            print("::error title=icon::Assets.car contains no AppIcon entry; "
+                  "AppIcon.appiconset/Contents.json must list per-device sizes")
+            ok = False
+        else:
+            print("  ok Assets.car has AppIcon rendition")
+
+    # Info.plist 里如果写了 CFBundleIconName，系统会优先去 Assets.car 找；
+    # 找不到就直接画占位图，散装 PNG 再多也救不回来。
+    import plistlib
+    with open(os.path.join(app, "Info.plist"), "rb") as f:
+        pl = plistlib.load(f)
+    primary = pl.get("CFBundleIcons", {}).get("CFBundlePrimaryIcon", {})
+    if primary.get("CFBundleIconName") and b"AppIcon" not in open(car, "rb").read():
+        print("::error title=icon::CFBundleIconName set but Assets.car lacks it")
+        ok = False
 
     return 0 if ok else 1
 

@@ -107,6 +107,7 @@ final class DownloadEngine: ObservableObject {
 
   func pause(_ task: DownloadTask) {
     task.state = .paused
+    task.resetSpeed()
     running.removeValue(forKey: task.id)?.cancel()
   }
 
@@ -135,13 +136,16 @@ final class DownloadEngine: ObservableObject {
       guard task.state != .paused else { return }
       task.state = .done
       task.finishedAt = Date()
+      task.resetSpeed()
       try? FileManager.default.removeItem(at: task.stateURL)
       store.save(task)
     } catch is CancellationError {
       task.state = .paused
+      task.resetSpeed()
       store.save(task)
     } catch {
       task.state = .failed
+      task.resetSpeed()
       task.errorText = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
       store.save(task)
     }
@@ -257,7 +261,7 @@ final class DownloadEngine: ObservableObject {
       guard let chunk = try input.read(upToCount: EngineLimits.copyChunk), !chunk.isEmpty else { break }
       try out.write(contentsOf: chunk)
       task.receivedBytes += Int64(chunk.count)
-      task.updatedAt = Date()
+      task.recordProgress()
     }
   }
 
@@ -316,7 +320,7 @@ final class DownloadEngine: ObservableObject {
       let delta = Int64(chunk.count)
       task.segments[index].received += delta
       task.receivedBytes += delta
-      task.updatedAt = Date()
+      task.recordProgress()
     }
   }
 
@@ -443,6 +447,26 @@ final class DownloadTask: ObservableObject, Identifiable {
   @Published var updatedAt = Date()
   @Published var finishedAt: Date?
 
+  /// 实时速度（字节/秒）。由引擎在写数据时喂样本，界面直接读。
+  @Published private(set) var bytesPerSecond: Double = 0
+
+  /// 本次任务出现过的峰值速度，结算时一起显示。
+  @Published private(set) var peakBytesPerSecond: Double = 0
+
+  /// 滑动窗口里的采样点：(时间, 累计字节)。
+  private var samples: [(t: TimeInterval, bytes: Int64)] = []
+  /// 窗口长度。1.5 秒既够平滑，又能及时反映掉速。
+  private static let window: TimeInterval = 1.5
+
+  /// 最后一次真正收到数据的时刻。用于判断「是不是卡住了」。
+  ///
+  /// 没有这个字段的话，速度只会在写数据时重算；一旦停滞（CDN 限流、
+  /// 分段重连、退避等待），`bytesPerSecond` 会永远停在最后一个值，
+  /// 界面上就是一个不动的假数字。
+  private var lastDataAt: TimeInterval = 0
+  /// 超过这个时长没有新数据，就认为速度归零。
+  private static let stallAfter: TimeInterval = 1.5
+
   init(url: URL, saveDir: URL, requestedThreads: Int,
        headers: [String: String], site: NetdiskSite?) {
     self.url = url
@@ -460,11 +484,80 @@ final class DownloadTask: ObservableObject, Identifiable {
     return min(1, Double(receivedBytes) / Double(totalBytes))
   }
 
+  // MARK: - 测速
+
+  /// 记一个采样点并重算速度。引擎每写一批数据调一次。
+  func recordProgress(now: TimeInterval = Date().timeIntervalSince1970) {
+    lastDataAt = now
+    samples.append((t: now, bytes: receivedBytes))
+    // 只留窗口内的样本，但至少留两个点，否则算不出差值。
+    while samples.count > 2, now - samples[0].t > Self.window {
+      samples.removeFirst()
+    }
+    guard let first = samples.first, let last = samples.last else {
+      bytesPerSecond = 0
+      return
+    }
+    let dt = last.t - first.t
+    // 之前是 0.05：速度很快时两个样本间隔可能不到 50ms，于是直接 return，
+    // 速度就停在旧值上不动。改成两个样本都等于同一时刻才跳过。
+    guard dt > 0.001 else { return }
+    let delta = Double(last.bytes - first.bytes)
+    bytesPerSecond = max(0, delta / dt)
+    if bytesPerSecond > peakBytesPerSecond { peakBytesPerSecond = bytesPerSecond }
+    updatedAt = Date()
+  }
+
+  /// 每秒由界面调用一次：长时间没收到数据就把速度清零。
+  ///
+  /// 下载停滞时没有任何回调，必须靠外部心跳才能把「假的固定速度」清掉。
+  func tickSpeed(now: TimeInterval = Date().timeIntervalSince1970) {
+    guard state == .downloading else { return }
+    if lastDataAt > 0, now - lastDataAt > Self.stallAfter {
+      samples.removeAll()
+      bytesPerSecond = 0
+    }
+  }
+
+  /// 停下时把速度归零，免得暂停后还挂着旧数字。
+  func resetSpeed() {
+    samples.removeAll()
+    bytesPerSecond = 0
+    lastDataAt = 0
+  }
+
+  /// 界面用的一行速度文本；没有速度时返回 nil，方便调用方决定要不要占位。
+  var speedLabel: String? {
+    guard state == .downloading, bytesPerSecond > 0 else { return nil }
+    return ByteText.perSecond(bytesPerSecond)
+  }
+
+  /// 速度数字（不含单位），给大号显示用。
+  var speedValue: String {
+    ByteText.valueOnly(bytesPerSecond)
+  }
+
+  /// 速度单位，给大号显示用。
+  var speedUnit: String {
+    ByteText.unitOnly(bytesPerSecond)
+  }
+
+  /// 完成后的平均速度，作为结算信息。
   var speedText: String {
     guard let finishedAt else { return "" }
     let elapsed = finishedAt.timeIntervalSince(createdAt)
     guard elapsed > 0 else { return "" }
     return ByteText.perSecond(Double(totalBytes) / elapsed)
+  }
+
+  /// 剩余时间估算。样本太少或速度太低时返回 nil。
+  var remainingLabel: String? {
+    guard state == .downloading, bytesPerSecond > 1, totalBytes > receivedBytes else { return nil }
+    let seconds = Double(totalBytes - receivedBytes) / bytesPerSecond
+    guard seconds.isFinite, seconds > 0 else { return nil }
+    if seconds < 60 { return "约 \(Int(seconds.rounded())) 秒" }
+    if seconds < 3600 { return "约 \(Int(seconds / 60)) 分钟" }
+    return String(format: "约 %.1f 小时", seconds / 3600)
   }
 }
 
@@ -576,5 +669,23 @@ enum ByteText {
 
   static func perSecond(_ n: Double) -> String {
     bytes(Int64(n)) + "/s"
+  }
+
+  /// 只给数字部分：`12.3`。
+  static func valueOnly(_ n: Double) -> String {
+    let units = ["B", "KB", "MB", "GB", "TB"]
+    var value = max(0, n)
+    var i = 0
+    while value >= 1024, i < units.count - 1 { value /= 1024; i += 1 }
+    return String(format: i == 0 ? "%.0f" : "%.1f", value)
+  }
+
+  /// 只给单位部分：`MB/s`。
+  static func unitOnly(_ n: Double) -> String {
+    let units = ["B", "KB", "MB", "GB", "TB"]
+    var value = max(0, n)
+    var i = 0
+    while value >= 1024, i < units.count - 1 { value /= 1024; i += 1 }
+    return units[i] + "/s"
   }
 }

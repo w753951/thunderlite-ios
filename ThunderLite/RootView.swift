@@ -37,7 +37,11 @@ struct RootView: View {
       .sheet(isPresented: $showingSettings) {
         SettingsView().environmentObject(prefs)
       }
-      .onReceive(ticker) { _ in syncKeepAwake() }
+      .onReceive(ticker) { _ in
+        syncKeepAwake()
+        // 下载停滞时没有回调，靠这个心跳把假速度清掉。
+        for task in engine.tasks { task.tickSpeed() }
+      }
       .onAppear { syncKeepAwake() }
     }
     .navigationViewStyle(.stack)
@@ -250,6 +254,8 @@ struct TaskRow: View {
           .tint(task.state == .paused ? Color.orange : Color.accentColor)
       }
 
+      speedPanel
+
       if let error = task.errorText, task.state == .failed {
         Text(error)
           .font(.footnote)
@@ -259,6 +265,28 @@ struct TaskRow: View {
     }
     .padding(13)
     .background(Color(white: 0.13), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+  }
+
+  /// 实时速度面板：大号数字每秒刷新。
+  @ViewBuilder
+  private var speedPanel: some View {
+    if task.state == .downloading || task.state == .paused {
+      HStack(alignment: .firstTextBaseline, spacing: 4) {
+        Text(task.speedValue)
+          .font(.system(size: 26, weight: .semibold, design: .rounded))
+          .monospacedDigit()
+          .foregroundColor(task.state == .paused ? Color.orange : Color.accentColor)
+        Text(task.speedUnit)
+          .font(.system(size: 13, weight: .medium, design: .rounded))
+          .foregroundColor(Color(white: 0.55))
+        Spacer(minLength: 8)
+        if let left = task.remainingLabel {
+          Text(left)
+            .font(.caption)
+            .foregroundColor(Color.secondary)
+        }
+      }
+    }
   }
 
   private var subtitle: String {
@@ -272,7 +300,10 @@ struct TaskRow: View {
     case .paused:
       return "已暂停 · \(Int(task.progress * 100))%"
     case .done:
-      return "完成 · \(ByteText.bytes(task.totalBytes))"
+      let avg = task.speedText
+      return avg.isEmpty
+        ? "完成 · \(ByteText.bytes(task.totalBytes))"
+        : "完成 · \(ByteText.bytes(task.totalBytes)) · 平均 \(avg)"
     case .failed:
       return "失败"
     }

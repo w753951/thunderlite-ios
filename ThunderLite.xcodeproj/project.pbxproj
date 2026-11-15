@@ -14,6 +14,13 @@
 		AA00000000000000000005 /* NetdiskSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000000000000000015 /* NetdiskSupport.swift */; };
 		AA00000000000000000006 /* Prefs.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000000000000000016 /* Prefs.swift */; };
 		AA00000000000000000007 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA00000000000000000017 /* Assets.xcassets */; };
+		AA0000000000000000B000 /* AppIcon29x29@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000C000 /* AppIcon29x29@2x.png */; };
+		AA0000000000000000B001 /* AppIcon29x29@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000C001 /* AppIcon29x29@3x.png */; };
+		AA0000000000000000B002 /* AppIcon40x40@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000C002 /* AppIcon40x40@2x.png */; };
+		AA0000000000000000B003 /* AppIcon40x40@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000C003 /* AppIcon40x40@3x.png */; };
+		AA0000000000000000B004 /* AppIcon60x60@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000C004 /* AppIcon60x60@2x.png */; };
+		AA0000000000000000B005 /* AppIcon60x60@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000C005 /* AppIcon60x60@3x.png */; };
+		AA0000000000000000B006 /* AppIcon76x76@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000C006 /* AppIcon76x76@2x.png */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -26,6 +33,13 @@
 		AA00000000000000000016 /* Prefs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Prefs.swift; sourceTree = "<group>"; };
 		AA00000000000000000017 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		AA00000000000000000018 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		AA0000000000000000C000 /* AppIcon29x29@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Icons/AppIcon29x29@2x.png"; sourceTree = "<group>"; };
+		AA0000000000000000C001 /* AppIcon29x29@3x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Icons/AppIcon29x29@3x.png"; sourceTree = "<group>"; };
+		AA0000000000000000C002 /* AppIcon40x40@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Icons/AppIcon40x40@2x.png"; sourceTree = "<group>"; };
+		AA0000000000000000C003 /* AppIcon40x40@3x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Icons/AppIcon40x40@3x.png"; sourceTree = "<group>"; };
+		AA0000000000000000C004 /* AppIcon60x60@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Icons/AppIcon60x60@2x.png"; sourceTree = "<group>"; };
+		AA0000000000000000C005 /* AppIcon60x60@3x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Icons/AppIcon60x60@3x.png"; sourceTree = "<group>"; };
+		AA0000000000000000C006 /* AppIcon76x76@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Icons/AppIcon76x76@2x.png"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -58,6 +72,13 @@
 				AA00000000000000000016 /* Prefs.swift */,
 				AA00000000000000000017 /* Assets.xcassets */,
 				AA00000000000000000018 /* Info.plist */,
+				AA0000000000000000C000 /* AppIcon29x29@2x.png */,
+				AA0000000000000000C001 /* AppIcon29x29@3x.png */,
+				AA0000000000000000C002 /* AppIcon40x40@2x.png */,
+				AA0000000000000000C003 /* AppIcon40x40@3x.png */,
+				AA0000000000000000C004 /* AppIcon60x60@2x.png */,
+				AA0000000000000000C005 /* AppIcon60x60@3x.png */,
+				AA0000000000000000C006 /* AppIcon76x76@2x.png */,
 			);
 			path = ThunderLite;
 			sourceTree = "<group>";
@@ -130,6 +151,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				AA00000000000000000007 /* Assets.xcassets in Resources */,
+				AA0000000000000000B000 /* AppIcon29x29@2x.png in Resources */,
+				AA0000000000000000B001 /* AppIcon29x29@3x.png in Resources */,
+				AA0000000000000000B002 /* AppIcon40x40@2x.png in Resources */,
+				AA0000000000000000B003 /* AppIcon40x40@3x.png in Resources */,
+				AA0000000000000000B004 /* AppIcon60x60@2x.png in Resources */,
+				AA0000000000000000B005 /* AppIcon60x60@3x.png in Resources */,
+				AA0000000000000000B006 /* AppIcon76x76@2x.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
