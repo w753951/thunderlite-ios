@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import Combine
 
 /// 主界面：输入链接 → 下载 → 看进度。
 struct RootView: View {
@@ -11,8 +12,11 @@ struct RootView: View {
   @State private var showingSettings = false
   @FocusState private var inputFocused: Bool
 
+  /// 每秒对一次「该不该常亮」。KeepAwake.set 内部会先去重，代价可以忽略。
+  private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
   var body: some View {
-    NavigationStack {
+    NavigationView {
       VStack(spacing: 0) {
         inputBar
         if let errorText {
@@ -24,7 +28,7 @@ struct RootView: View {
       .navigationTitle("下载器")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
-        ToolbarItem(placement: .topBarTrailing) {
+        ToolbarItem(placement: .navigationBarTrailing) {
           Button { showingSettings = true } label: {
             Image(systemName: "gearshape")
           }
@@ -33,11 +37,10 @@ struct RootView: View {
       .sheet(isPresented: $showingSettings) {
         SettingsView().environmentObject(prefs)
       }
-      .onChange(of: engine.tasks.count) { _, _ in syncKeepAwake() }
-      .onAppear {
-        PasteboardWatcher.start()
-      }
+      .onReceive(ticker) { _ in syncKeepAwake() }
+      .onAppear { syncKeepAwake() }
     }
+    .navigationViewStyle(.stack)
   }
 
   // MARK: - 输入
@@ -45,14 +48,15 @@ struct RootView: View {
   private var inputBar: some View {
     VStack(spacing: 10) {
       HStack(spacing: 10) {
-        TextField("粘贴链接（支持网盘直链）", text: $input, axis: .vertical)
-          .lineLimit(1...3)
+        TextField("粘贴链接（支持网盘直链）", text: $input)
           .textInputAutocapitalization(.never)
           .autocorrectionDisabled()
           .keyboardType(.URL)
+          .submitLabel(.go)
           .focused($inputFocused)
+          .onSubmit { submit() }
           .padding(.horizontal, 14)
-          .padding(.vertical, 11)
+          .padding(.vertical, 13)
           .background(Color(white: 0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
         if input.isEmpty {
@@ -87,7 +91,7 @@ struct RootView: View {
         Text("\(prefs.threads) 线程")
           .font(.system(size: 11, weight: .medium))
       }
-      .foregroundStyle(.secondary)
+      .foregroundColor(Color.secondary)
     }
     .padding(.horizontal, 16)
     .padding(.top, 8)
@@ -109,7 +113,7 @@ struct RootView: View {
           .font(.system(size: 11, weight: .bold))
       }
     }
-    .foregroundStyle(.orange)
+    .foregroundColor(Color.orange)
     .padding(12)
     .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     .padding(.horizontal, 16)
@@ -144,7 +148,6 @@ struct RootView: View {
         }
       }
       .listStyle(.plain)
-      .scrollContentBackground(.hidden)
     }
   }
 
@@ -153,14 +156,14 @@ struct RootView: View {
       Spacer()
       Image(systemName: "arrow.down.circle")
         .font(.system(size: 54, weight: .thin))
-        .foregroundStyle(.tertiary)
+        .foregroundColor(Color(white: 0.35))
       Text("把链接粘到上面")
         .font(.system(size: 15, weight: .medium))
-        .foregroundStyle(.secondary)
+        .foregroundColor(Color.secondary)
       Text("支持 HTTP/HTTPS 直链与 8 家网盘\n最多 32 线程分块下载")
         .font(.system(size: 12))
         .multilineTextAlignment(.center)
-        .foregroundStyle(.tertiary)
+        .foregroundColor(Color(white: 0.4))
       Spacer()
     }
     .frame(maxWidth: .infinity)
@@ -181,7 +184,10 @@ struct RootView: View {
     let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !text.isEmpty else { return }
     do {
-      try engine.add(url: text, saveTo: prefs.saveDirectory(), threads: prefs.threads)
+      let siteKey = NetdiskSupport.site(for: text)?.key
+      let cookie = siteKey.flatMap { prefs.cookie(for: $0) }
+      try engine.add(url: text, saveTo: prefs.saveDirectory(),
+                     threads: prefs.threads, cookie: cookie)
       input = ""
       errorText = nil
       inputFocused = false
@@ -192,10 +198,7 @@ struct RootView: View {
   }
 
   private func syncKeepAwake() {
-    let active = prefs.keepAwake && engine.tasks.contains {
-      $0.state == .downloading || $0.state == .waiting || $0.state == .probing
-    }
-    KeepAwake.set(active)
+    KeepAwake.set(prefs.keepAwake && engine.hasActiveTask)
   }
 }
 
@@ -217,13 +220,12 @@ struct TaskRow: View {
                 .font(.system(size: 10, weight: .semibold))
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
-                .background(Color(hex: site.color).opacity(0.22),
-                            in: Capsule())
-                .foregroundStyle(Color(hex: site.color))
+                .background(Color(hex: site.color).opacity(0.22), in: Capsule())
+                .foregroundColor(Color(hex: site.color))
             }
             Text(subtitle)
               .font(.system(size: 11))
-              .foregroundStyle(.secondary)
+              .foregroundColor(Color.secondary)
           }
         }
         Spacer(minLength: 0)
@@ -233,13 +235,13 @@ struct TaskRow: View {
       if task.state == .downloading || task.state == .paused || task.state == .waiting {
         ProgressView(value: task.progress)
           .progressViewStyle(.linear)
-          .tint(task.state == .paused ? .orange : .accentColor)
+          .tint(task.state == .paused ? Color.orange : Color.accentColor)
       }
 
       if let error = task.errorText, task.state == .failed {
         Text(error)
           .font(.system(size: 11))
-          .foregroundStyle(.red.opacity(0.85))
+          .foregroundColor(Color.red.opacity(0.85))
           .lineLimit(3)
       }
     }
@@ -280,7 +282,7 @@ struct TaskRow: View {
     case .done:
       Image(systemName: "checkmark.circle.fill")
         .font(.system(size: 26))
-        .foregroundStyle(.green)
+        .foregroundColor(Color.green)
     }
   }
 }
@@ -295,9 +297,4 @@ extension Color {
       opacity: 1
     )
   }
-}
-
-/// 只是让 App 回到前台时能刷新剪贴板状态；真正的粘贴按钮在自己按。
-enum PasteboardWatcher {
-  static func start() {}
 }

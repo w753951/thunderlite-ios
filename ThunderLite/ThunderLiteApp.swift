@@ -7,13 +7,18 @@ struct ThunderLiteApp: App {
   @StateObject private var prefs = Prefs.shared
   @Environment(\.scenePhase) private var scenePhase
 
+  init() {
+    // 纯黑背景更省电，也让列表和输入框的深灰层次更清楚。
+    UITableView.appearance().backgroundColor = .clear
+  }
+
   var body: some Scene {
     WindowGroup {
       ThunderLiteRoot()
         .environmentObject(engine)
         .environmentObject(prefs)
         .preferredColorScheme(.dark)
-        .onChange(of: scenePhase) { _, phase in
+        .onChange(of: scenePhase) { phase in
           switch phase {
           case .active:
             // 回到前台：按当前是否有任务重新评估常亮。

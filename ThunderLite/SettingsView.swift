@@ -7,7 +7,7 @@ struct SettingsView: View {
   @State private var editingSite: NetdiskSite?
 
   var body: some View {
-    NavigationStack {
+    NavigationView {
       Form {
         download
         netdisk
@@ -16,7 +16,7 @@ struct SettingsView: View {
       .navigationTitle("设置")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
-        ToolbarItem(placement: .confirmationAction) {
+        ToolbarItem(placement: .navigationBarTrailing) {
           Button("完成") { dismiss() }
         }
       }
@@ -24,6 +24,7 @@ struct SettingsView: View {
         CookieSheet(site: site).environmentObject(prefs)
       }
     }
+    .navigationViewStyle(.stack)
   }
 
   // MARK: - 下载
@@ -35,7 +36,7 @@ struct SettingsView: View {
           Text("线程数")
           Spacer()
           Text("\(prefs.threads)")
-            .foregroundStyle(.secondary)
+            .foregroundColor(Color.secondary)
             .monospacedDigit()
         }
         Slider(
@@ -48,7 +49,7 @@ struct SettingsView: View {
         )
         Text("网盘会自动收窄并发：夸克 32、百度 8、阿里 4 —— 开太高会被 CDN 限流。")
           .font(.system(size: 11))
-          .foregroundStyle(.secondary)
+          .foregroundColor(Color.secondary)
       }
 
       Toggle(isOn: $prefs.useSystemDownloads) {
@@ -58,7 +59,7 @@ struct SettingsView: View {
                ? "/var/mobile/Downloads"
                : "本机不可写，会自动用 App 目录")
             .font(.system(size: 11))
-            .foregroundStyle(.secondary)
+            .foregroundColor(Color.secondary)
         }
       }
       .disabled(!prefs.systemDownloadsAvailable)
@@ -70,7 +71,7 @@ struct SettingsView: View {
         Spacer()
         Text(prefs.saveDirectoryLabel())
           .font(.system(size: 11))
-          .foregroundStyle(.secondary)
+          .foregroundColor(Color.secondary)
           .lineLimit(1)
           .truncationMode(.middle)
       }
@@ -93,22 +94,22 @@ struct SettingsView: View {
               .frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 2) {
               Text(site.name)
-                .foregroundStyle(.primary)
+                .foregroundColor(Color.primary)
               Text(site.sendCookie
                    ? "需要 Cookie"
                    : "不带 Cookie（带了反而被限速）")
                 .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                .foregroundColor(Color.secondary)
             }
             Spacer()
             if site.sendCookie {
               Text(prefs.cookieLength(for: site.key) > 0 ? "已填" : "未填")
                 .font(.system(size: 12))
-                .foregroundStyle(prefs.cookieLength(for: site.key) > 0 ? .green : .orange)
+                .foregroundColor(prefs.cookieLength(for: site.key) > 0 ? Color.green : Color.orange)
             }
             Image(systemName: "chevron.right")
               .font(.system(size: 12, weight: .semibold))
-              .foregroundStyle(.tertiary)
+              .foregroundColor(Color(white: 0.4))
           }
         }
       }
@@ -127,12 +128,12 @@ struct SettingsView: View {
         Text("版本")
         Spacer()
         Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
-          .foregroundStyle(.secondary)
+          .foregroundColor(Color.secondary)
       }
     } header: {
       Text("关于")
     } footer: {
-      Text("30 线程分块 · 断点续传 · 8 家网盘直链")
+      Text("最多 32 线程分块 · 断点续传 · 8 家网盘直链")
     }
   }
 }
@@ -150,7 +151,7 @@ struct CookieSheet: View {
   @State private var text = ""
 
   var body: some View {
-    NavigationStack {
+    NavigationView {
       Form {
         Section {
           TextEditor(text: $text)
@@ -178,10 +179,10 @@ struct CookieSheet: View {
       .navigationTitle(site.name)
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
-        ToolbarItem(placement: .cancellationAction) {
+        ToolbarItem(placement: .navigationBarLeading) {
           Button("取消") { dismiss() }
         }
-        ToolbarItem(placement: .confirmationAction) {
+        ToolbarItem(placement: .navigationBarTrailing) {
           Button("保存") {
             prefs.setCookie(text, for: site.key)
             dismiss()
@@ -192,5 +193,6 @@ struct CookieSheet: View {
         text = prefs.cookie(for: site.key) ?? ""
       }
     }
+    .navigationViewStyle(.stack)
   }
 }

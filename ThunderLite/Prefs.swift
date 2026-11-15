@@ -1,4 +1,6 @@
 import Foundation
+import UIKit
+import Combine
 
 /// 下载目录与网盘 Cookie 的偏好设置。
 ///

@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 /// 下载引擎：多线程分块 + 断点续传 + 网盘头补全。
 ///
@@ -6,9 +7,15 @@ import Foundation
 ///   - 探测用 `GET` + `Range: bytes=0-0`，不用 HEAD —— 阿里云盘 OSS、夸克这类
 ///     CDN 会拒绝 HEAD，只有 GET 才返回真实大小。
 ///   - 文件切成若干段并行拉，每段独立 Range 请求，失败单独重试。
-///   - 进度写进同名 `.thunderlite.json` 旁文件，重开 App 能接着下。
+///   - 进度写进 App 支持目录的 tasks.json，重开 App 能接着下。
 ///   - 并发数按站点上限收窄：夸克/UC 能拉满 32，百度 8、阿里 4，
 ///     超过就被 CDN 限速甚至 412 风控。
+///
+/// 两个容易踩的坑，代码里都处理了：
+///   1. `URLSession.shared` 每个 host 只开 6 条连接，32 线程会被它卡成 6；
+///      所以这里用自己配的 session，把 httpMaximumConnectionsPerHost 提到 32。
+///   2. 逐字节 `for try await byte in bytes` 每个字节一次挂起，实测不到 1MB/s；
+///      改成每段走 `download(for:)` 落到临时文件，再按 512KB 拷进目标文件。
 @MainActor
 final class DownloadEngine: ObservableObject {
   static let shared = DownloadEngine()
@@ -21,6 +28,8 @@ final class DownloadEngine: ObservableObject {
   static let probeTimeout: TimeInterval = 20
   /// 单段最多重试次数。
   static let maxSegmentRetries = 4
+  /// 临时文件往目标文件搬的时候每次读多少。
+  static let copyChunk = 512 * 1024
 
   @Published private(set) var tasks: [DownloadTask] = []
 
@@ -30,17 +39,32 @@ final class DownloadEngine: ObservableObject {
   }
 
   private var running: [UUID: Task<Void, Never>] = [:]
-  private let store: TaskStore
 
-  init(store: TaskStore = TaskStore()) {
-    self.store = store
-  }
+  /// 惰性创建：TaskStore 是 MainActor 隔离的，不能出现在默认参数里。
+  private lazy var store = TaskStore()
+
+  /// 专用会话。默认 session 每条 host 仅 6 连接，不开这个 32 线程没意义。
+  private lazy var session: URLSession = {
+    let config = URLSessionConfiguration.default
+    config.httpMaximumConnectionsPerHost = Self.maxThreads
+    config.timeoutIntervalForRequest = 30
+    config.timeoutIntervalForResource = 60 * 60 * 12
+    config.requestCachePolicy = .reloadIgnoringLocalCacheData
+    config.urlCache = nil
+    config.httpShouldUsePipelining = false
+    return URLSession(configuration: config)
+  }()
+
+  init() {}
 
   // MARK: - 任务生命周期
 
   /// 新建一个任务并立刻开跑。返回的任务对象由 `tasks` 持有。
+  ///
+  /// - Parameter cookie: 该网盘用户填的 Cookie；按站点的 sendCookie 决定要不要带。
   @discardableResult
   func add(url: String, saveTo directory: URL, threads: Int = maxThreads,
+           cookie: String? = nil,
            extraHeaders: [String: String] = [:]) throws -> DownloadTask {
     guard let parsed = URL(string: url.trimmingCharacters(in: .whitespacesAndNewlines)),
           let scheme = parsed.scheme?.lowercased(), ["http", "https"].contains(scheme)
@@ -51,8 +75,11 @@ final class DownloadEngine: ObservableObject {
       throw EngineError.sharePage(share)
     }
 
-    let resolved = NetdiskSupport.resolve(url: parsed.absoluteString, extra: extraHeaders)
-    let task = DownloadTask(url: resolved.url, saveDir: directory,
+    let resolved = NetdiskSupport.resolve(url: parsed.absoluteString,
+                                         extra: extraHeaders, cookie: cookie)
+    guard let target = URL(string: resolved.url) else { throw EngineError.badURL }
+
+    let task = DownloadTask(url: target, saveDir: directory,
                             requestedThreads: threads, headers: resolved.headers,
                             site: resolved.site)
     tasks.insert(task, at: 0)
@@ -120,9 +147,12 @@ final class DownloadEngine: ObservableObject {
     for (k, v) in task.headers { request.setValue(v, forHTTPHeaderField: k) }
     request.setValue("bytes=0-0", forHTTPHeaderField: "Range")
 
-    let (bytes, response) = try await URLSession.shared.bytes(for: request)
-    guard let http = response as? HTTPURLResponse else { throw EngineError.badResponse }
-    // 只取头部，正文立刻丢掉。
+    // 只要响应头，拿到就掐断正文，不会把整个文件拖下来。
+    let (bytes, response) = try await session.bytes(for: request)
+    guard let http = response as? HTTPURLResponse else {
+      bytes.task.cancel()
+      throw EngineError.badResponse
+    }
     bytes.task.cancel()
 
     let status = http.statusCode
@@ -177,15 +207,13 @@ final class DownloadEngine: ObservableObject {
 
     let segments = Self.planSegments(total: total, threads: effectiveThreads(task))
     task.segments = segments
-
-    let handle = try FileHandle(forWritingTo: task.fileURL)
-    defer { try? handle.close() }
+    task.receivedBytes = segments.reduce(0) { $0 + $1.received }
 
     try await withThrowingTaskGroup(of: Void.self) { group in
       for index in segments.indices {
         group.addTask { [weak self] in
           guard let self else { return }
-          try await self.fetchSegment(task, index: index, handle: handle)
+          try await self.fetchSegment(task, index: index)
         }
       }
       try await group.waitForAll()
@@ -194,45 +222,41 @@ final class DownloadEngine: ObservableObject {
     // 有些服务器即使声明支持 Range，某些段仍会短少；补齐后校验。
     task.receivedBytes = task.segments.reduce(0) { $0 + $1.received }
     guard task.receivedBytes >= total else { throw EngineError.incomplete }
-    try handle.synchronize()
   }
 
   /// 不分块的退路：一条流从头拉到尾。
   private func downloadSingleStream(_ task: DownloadTask) async throws {
-    var request = URLRequest(url: task.url)
+    var request = URLRequest(url: task.url, timeoutInterval: 60)
     for (k, v) in task.headers { request.setValue(v, forHTTPHeaderField: k) }
 
-    let (bytes, response) = try await URLSession.shared.bytes(for: request)
-    guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+    let (tempURL, response) = try await session.download(for: request)
+    defer { try? FileManager.default.removeItem(at: tempURL) }
+    guard let http = response as? HTTPURLResponse,
+          http.statusCode == 200 || http.statusCode == 206 else {
       throw EngineError.badResponse
     }
-    let handle = try FileHandle(forWritingTo: task.fileURL)
-    defer { try? handle.close() }
-    try handle.truncate(atOffset: 0)
 
-    var buffer = Data()
-    buffer.reserveCapacity(64 * 1024)
-    var written: Int64 = 0
-    for try await byte in bytes {
-      buffer.append(byte)
-      if buffer.count >= 64 * 1024 {
-        try handle.write(contentsOf: buffer)
-        written += Int64(buffer.count)
-        buffer.removeAll(keepingCapacity: true)
-        task.receivedBytes = written
-        Task { @MainActor in self.store.save(task) }
-      }
-      if task.state == .paused { throw CancellationError() }
+    let out = try FileHandle(forWritingTo: task.fileURL)
+    defer { try? out.close() }
+    try out.truncate(atOffset: 0)
+
+    let input = try FileHandle(forReadingFrom: tempURL)
+    defer { try? input.close() }
+
+    while true {
+      if task.state == .paused || Task.isCancelled { throw CancellationError() }
+      guard let chunk = try input.read(upToCount: Self.copyChunk), !chunk.isEmpty else { break }
+      try out.write(contentsOf: chunk)
+      task.receivedBytes += Int64(chunk.count)
+      task.updatedAt = Date()
     }
-    if !buffer.isEmpty {
-      try handle.write(contentsOf: buffer)
-      written += Int64(buffer.count)
-    }
-    task.receivedBytes = written
   }
 
   /// 拉一个分块，自带重试与续点。
-  private func fetchSegment(_ task: DownloadTask, index: Int, handle: FileHandle) async throws {
+  ///
+  /// 整段交给 `download(for:)` 落到系统临时文件，再按块搬进目标文件的对应偏移。
+  /// 这样既不占内存（峰值一个块），也不会因为逐字节 await 把速度拖死。
+  private func fetchSegment(_ task: DownloadTask, index: Int) async throws {
     var attempt = 0
     while attempt <= Self.maxSegmentRetries {
       if task.state == .paused || Task.isCancelled { throw CancellationError() }
@@ -240,44 +264,19 @@ final class DownloadEngine: ObservableObject {
       let from = seg.start + seg.received
       guard from <= seg.end else { return }
 
-      var request = URLRequest(url: task.url, timeoutInterval: 30)
+      var request = URLRequest(url: task.url, timeoutInterval: 60)
       for (k, v) in task.headers { request.setValue(v, forHTTPHeaderField: k) }
       request.setValue("bytes=\(from)-\(seg.end)", forHTTPHeaderField: "Range")
 
       do {
-        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        let (tempURL, response) = try await session.download(for: request)
+        defer { try? FileManager.default.removeItem(at: tempURL) }
         guard let http = response as? HTTPURLResponse else { throw EngineError.badResponse }
-        guard http.statusCode == 206 else {
+        guard http.statusCode == 206 || http.statusCode == 200 else {
           throw EngineError.http(http.statusCode, NetdiskSupport.hint(for: http.statusCode))
         }
-
-        var buffer = Data()
-        buffer.reserveCapacity(128 * 1024)
-        var offset = from
-        for try await byte in bytes {
-          if task.state == .paused || Task.isCancelled { throw CancellationError() }
-          buffer.append(byte)
-          if buffer.count >= 128 * 1024 {
-            try Self.write(buffer, to: handle, at: offset)
-            offset += Int64(buffer.count)
-            let delta = Int64(buffer.count)
-            buffer.removeAll(keepingCapacity: true)
-            await MainActor.run {
-              task.segments[index].received += delta
-              task.receivedBytes += delta
-              task.updatedAt = Date()
-            }
-          }
-        }
-        if !buffer.isEmpty {
-          try Self.write(buffer, to: handle, at: offset)
-          let delta = Int64(buffer.count)
-          await MainActor.run {
-            task.segments[index].received += delta
-            task.receivedBytes += delta
-          }
-        }
-        await MainActor.run { self.store.save(task) }
+        try merge(tempURL, into: task, index: index, at: from)
+        store.save(task)
         return
       } catch is CancellationError {
         throw CancellationError()
@@ -288,6 +287,27 @@ final class DownloadEngine: ObservableObject {
         let delay = UInt64(pow(1.8, Double(attempt)) * 400_000_000)
         try await Task.sleep(nanoseconds: delay)
       }
+    }
+  }
+
+  /// 把临时文件的内容写到目标文件的指定偏移。
+  ///
+  /// 全程同步、中间没有 await，所以 32 个分块即便并发也不会互相插队改写偏移。
+  private func merge(_ tempURL: URL, into task: DownloadTask, index: Int, at offset: Int64) throws {
+    let out = try FileHandle(forWritingTo: task.fileURL)
+    defer { try? out.close() }
+    let input = try FileHandle(forReadingFrom: tempURL)
+    defer { try? input.close() }
+
+    try out.seek(toOffset: UInt64(offset))
+    while true {
+      if task.state == .paused || Task.isCancelled { throw CancellationError() }
+      guard let chunk = try input.read(upToCount: Self.copyChunk), !chunk.isEmpty else { break }
+      try out.write(contentsOf: chunk)
+      let delta = Int64(chunk.count)
+      task.segments[index].received += delta
+      task.receivedBytes += delta
+      task.updatedAt = Date()
     }
   }
 
@@ -329,12 +349,6 @@ final class DownloadEngine: ObservableObject {
     if current < UInt64(size) {
       try handle.truncate(atOffset: UInt64(size))
     }
-  }
-
-  /// 定位写入。多线程各写各自的区段，不会互相覆盖。
-  static func write(_ data: Data, to handle: FileHandle, at offset: Int64) throws {
-    try handle.seek(toOffset: UInt64(offset))
-    try handle.write(contentsOf: data)
   }
 
   static func fileName(from response: HTTPURLResponse, url: URL) -> String {
@@ -461,7 +475,7 @@ enum EngineError: LocalizedError {
     case .badURL:
       return "链接格式不对，需要 http:// 或 https:// 开头。"
     case .sharePage(let name):
-      return "这是\(name)的分享页，不是直链。请先在网页里「下载」拿到直链，或使用网盘转存工具。"
+      return "这是\(name)的分享页，不是直链。请先在网页里「下载」拿到直链。"
     case .badResponse:
       return "服务器没有正常响应。"
     case .unknownSize:
