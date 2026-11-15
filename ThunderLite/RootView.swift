@@ -98,7 +98,7 @@ extension View {
 /// 主界面：输入链接 → 下载 → 看进度。
 struct RootView: View {
   @EnvironmentObject private var engine: DownloadEngine
-
+  @EnvironmentObject private var prefs: Prefs
 
   @State private var input = ""
   @State private var errorText: String?
@@ -329,12 +329,17 @@ struct RootView: View {
   private var actionButton: some View {
     let isPaste = input.isEmpty
     Button {
-      isPaste ? pasteFromClipboard() : submit()
+      if isPaste { pasteFromClipboard() } else { submit() }
     } label: {
       ZStack {
-        RoundedRectangle(cornerRadius: 14, style: .continuous)
-          .fill(isPaste ? AnyShapeStyle(Color.white.opacity(0.06))
-                        : AnyShapeStyle(Theme.accentGradient))
+        if isPaste {
+          RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .fill(Color.white.opacity(0.06))
+        } else {
+          RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .fill(Theme.accentGradient)
+        }
+
         RoundedRectangle(cornerRadius: 14, style: .continuous)
           .strokeBorder(
             isPaste ? Color.white.opacity(0.08) : Color.white.opacity(0.22),
@@ -345,7 +350,7 @@ struct RootView: View {
           .foregroundColor(isPaste ? Theme.textSecondary : Theme.bgDeep)
       }
       .frame(width: 48, height: 48)
-      .shadow(color: isPaste ? .clear : Theme.accent.opacity(0.35),
+      .shadow(color: isPaste ? Color.clear : Theme.accent.opacity(0.35),
               radius: 12, x: 0, y: 4)
     }
     .buttonStyle(.plain)
@@ -420,7 +425,7 @@ struct RootView: View {
 
         Image(systemName: "arrow.down")
           .font(.system(size: 34, weight: .light))
-          .foregroundStyle(Theme.accentGradient)
+          .foregroundColor(Theme.accent)
       }
       .padding(.bottom, 22)
 
