@@ -92,20 +92,25 @@ jobs:
           ls -la "$RUNNER_TEMP/ThunderLite.ipa"
           unzip -l "$RUNNER_TEMP/ThunderLite.ipa" | head -20
 
-      - name: Verify the ipa
-        run: |
-          set -euo pipefail
-          ipa="$RUNNER_TEMP/ThunderLite.ipa"
-          test -s "$ipa" || { echo "::error title=ipa::missing"; exit 1; }
-          # 必须是 arm64 设备二进制，且最低系统 15.0
-          xcrun vtool -show-build "$RUNNER_TEMP/ipa/Payload/ThunderLite.app/ThunderLite" 2>/dev/null \
-            || unzip -p "$ipa" Payload/ThunderLite.app/ThunderLite > "$RUNNER_TEMP/bin" \
-               && xcrun vtool -show-build "$RUNNER_TEMP/bin"
-          file "$RUNNER_TEMP/ipa/Payload/ThunderLite.app/ThunderLite" || true
-
       - uses: actions/upload-artifact@v4
         with:
           name: ThunderLite-ipa
           path: ${{ runner.temp }}/ThunderLite.ipa
           if-no-files-found: error
           retention-days: 14
+
+      # 校验放在上传之后：产物已经拿到了，这一步只做体检，不让它把整个 job 判死。
+      - name: Verify the ipa
+        run: |
+          set -uo pipefail
+          ipa="$RUNNER_TEMP/ThunderLite.ipa"
+          BIN="$RUNNER_TEMP/ipa/Payload/ThunderLite.app/ThunderLite"
+          test -s "$ipa" || { echo "::error title=ipa::missing"; exit 1; }
+          test -f "$BIN" || { echo "::error title=binary::ThunderLite binary missing"; exit 1; }
+          ls -la "$ipa" "$BIN"
+          file "$BIN"
+          file "$BIN" | grep -q arm64 || { echo "::error title=arch::not an arm64 binary"; exit 1; }
+          xcrun vtool -show-build "$BIN" || true
+          grep -q '<string>15.0</string>' ThunderLite/Info.plist \
+            || { echo "::error title=minios::MinimumOSVersion is not 15.0"; exit 1; }
+          unzip -l "$ipa" | tail -5

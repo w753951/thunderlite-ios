@@ -1,6 +1,24 @@
 import Foundation
 import Combine
 
+/// 引擎的固定参数。
+///
+/// 放在类型外面是有意的：`DownloadEngine` 是 MainActor 隔离的，它自己的静态常量
+/// 也带隔离，出现在默认参数里会报警告（Swift 6 里是错误）。这里都是纯常量，
+/// 不需要任何隔离。
+enum EngineLimits {
+  /// 用户设定的并发上限。真正并发还要和站点推荐值取小。
+  static let maxThreads = 32
+  /// 单段最小字节数：切太细会让请求开销盖过收益。
+  static let minSegmentBytes: Int64 = 2 * 1024 * 1024
+  /// 探测超时。
+  static let probeTimeout: TimeInterval = 20
+  /// 单段最多重试次数。
+  static let maxSegmentRetries = 4
+  /// 临时文件往目标文件搬的时候每次读写多少。
+  static let copyChunk = 512 * 1024
+}
+
 /// 下载引擎：多线程分块 + 断点续传 + 网盘头补全。
 ///
 /// 设计参照 thunder-lite 的 downloader.js：
@@ -20,17 +38,6 @@ import Combine
 final class DownloadEngine: ObservableObject {
   static let shared = DownloadEngine()
 
-  /// 用户设定的并发上限。真正并发还要和站点推荐值取小。
-  static let maxThreads = 32
-  /// 单段最小字节数：切太细会让请求开销盖过收益。
-  static let minSegmentBytes: Int64 = 2 * 1024 * 1024
-  /// 探测超时。
-  static let probeTimeout: TimeInterval = 20
-  /// 单段最多重试次数。
-  static let maxSegmentRetries = 4
-  /// 临时文件往目标文件搬的时候每次读多少。
-  static let copyChunk = 512 * 1024
-
   @Published private(set) var tasks: [DownloadTask] = []
 
   /// 有任务正在跑（用来决定要不要保持屏幕常亮）。
@@ -46,7 +53,7 @@ final class DownloadEngine: ObservableObject {
   /// 专用会话。默认 session 每条 host 仅 6 连接，不开这个 32 线程没意义。
   private lazy var session: URLSession = {
     let config = URLSessionConfiguration.default
-    config.httpMaximumConnectionsPerHost = Self.maxThreads
+    config.httpMaximumConnectionsPerHost = EngineLimits.maxThreads
     config.timeoutIntervalForRequest = 30
     config.timeoutIntervalForResource = 60 * 60 * 12
     config.requestCachePolicy = .reloadIgnoringLocalCacheData
@@ -63,7 +70,7 @@ final class DownloadEngine: ObservableObject {
   ///
   /// - Parameter cookie: 该网盘用户填的 Cookie；按站点的 sendCookie 决定要不要带。
   @discardableResult
-  func add(url: String, saveTo directory: URL, threads: Int = maxThreads,
+  func add(url: String, saveTo directory: URL, threads: Int = EngineLimits.maxThreads,
            cookie: String? = nil,
            extraHeaders: [String: String] = [:]) throws -> DownloadTask {
     guard let parsed = URL(string: url.trimmingCharacters(in: .whitespacesAndNewlines)),
@@ -92,7 +99,7 @@ final class DownloadEngine: ObservableObject {
     task.state = .probing
     running[task.id] = Task { [weak self] in
       await self?.run(task)
-      await MainActor.run { self?.running.removeValue(forKey: task.id) }
+      await MainActor.run { _ = self?.running.removeValue(forKey: task.id) }
     }
   }
 
@@ -142,7 +149,7 @@ final class DownloadEngine: ObservableObject {
 
   private func probe(_ task: DownloadTask) async throws {
     task.state = .probing
-    var request = URLRequest(url: task.url, timeoutInterval: Self.probeTimeout)
+    var request = URLRequest(url: task.url, timeoutInterval: EngineLimits.probeTimeout)
     request.httpMethod = "GET"
     for (k, v) in task.headers { request.setValue(v, forHTTPHeaderField: k) }
     request.setValue("bytes=0-0", forHTTPHeaderField: "Range")
@@ -245,7 +252,7 @@ final class DownloadEngine: ObservableObject {
 
     while true {
       if task.state == .paused || Task.isCancelled { throw CancellationError() }
-      guard let chunk = try input.read(upToCount: Self.copyChunk), !chunk.isEmpty else { break }
+      guard let chunk = try input.read(upToCount: EngineLimits.copyChunk), !chunk.isEmpty else { break }
       try out.write(contentsOf: chunk)
       task.receivedBytes += Int64(chunk.count)
       task.updatedAt = Date()
@@ -258,7 +265,7 @@ final class DownloadEngine: ObservableObject {
   /// 这样既不占内存（峰值一个块），也不会因为逐字节 await 把速度拖死。
   private func fetchSegment(_ task: DownloadTask, index: Int) async throws {
     var attempt = 0
-    while attempt <= Self.maxSegmentRetries {
+    while attempt <= EngineLimits.maxSegmentRetries {
       if task.state == .paused || Task.isCancelled { throw CancellationError() }
       let seg = task.segments[index]
       let from = seg.start + seg.received
@@ -282,7 +289,7 @@ final class DownloadEngine: ObservableObject {
         throw CancellationError()
       } catch {
         attempt += 1
-        if attempt > Self.maxSegmentRetries { throw error }
+        if attempt > EngineLimits.maxSegmentRetries { throw error }
         // 退避重试：CDN 抖动或短时限流
         let delay = UInt64(pow(1.8, Double(attempt)) * 400_000_000)
         try await Task.sleep(nanoseconds: delay)
@@ -302,7 +309,7 @@ final class DownloadEngine: ObservableObject {
     try out.seek(toOffset: UInt64(offset))
     while true {
       if task.state == .paused || Task.isCancelled { throw CancellationError() }
-      guard let chunk = try input.read(upToCount: Self.copyChunk), !chunk.isEmpty else { break }
+      guard let chunk = try input.read(upToCount: EngineLimits.copyChunk), !chunk.isEmpty else { break }
       try out.write(contentsOf: chunk)
       let delta = Int64(chunk.count)
       task.segments[index].received += delta
@@ -315,14 +322,14 @@ final class DownloadEngine: ObservableObject {
 
   /// 用户设定值与站点推荐值取小；站点未知时不额外限制。
   private func effectiveThreads(_ task: DownloadTask) -> Int {
-    let wanted = min(max(1, task.requestedThreads), Self.maxThreads)
+    let wanted = min(max(1, task.requestedThreads), EngineLimits.maxThreads)
     if let cap = task.site?.maxThreads { return min(wanted, cap) }
     return wanted
   }
 
   /// 把文件切成等长的 N 段。
   static func planSegments(total: Int64, threads: Int) -> [Segment] {
-    let maxBySize = max(1, Int(total / minSegmentBytes))
+    let maxBySize = max(1, Int(total / EngineLimits.minSegmentBytes))
     let count = max(1, min(threads, maxBySize))
     let size = total / Int64(count)
     var out: [Segment] = []
