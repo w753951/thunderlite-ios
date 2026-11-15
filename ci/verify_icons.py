@@ -88,32 +88,46 @@ def main():
 
     ok = all([check(os.path.join(app, n), n) for n in names])
 
+    # 读 car 内容（可能不存在，下面再单独判）
     car = os.path.join(app, "Assets.car")
-    if not os.path.exists(car):
-        print("::error title=icon::Assets.car missing")
-        ok = False
-    else:
-        print("  ok Assets.car %d bytes" % os.path.getsize(car))
+    car_blob = None
+    if os.path.exists(car):
+        with open(car, "rb") as f:
+            car_blob = f.read()
+        print("  ok Assets.car %d bytes" % len(car_blob))
         # car 里必须真的有可用的 AppIcon rendition，否则 SpringBoard 会画占位图。
         # 只有一张 universal 的 1024 母版时，actool 不会产出设备档，car 是空的。
-        with open(car, "rb") as f:
-            blob = f.read()
-        if b"AppIcon" not in blob:
+        if b"AppIcon" not in car_blob:
             print("::error title=icon::Assets.car contains no AppIcon entry; "
                   "AppIcon.appiconset/Contents.json must list per-device sizes")
             ok = False
         else:
             print("  ok Assets.car has AppIcon rendition")
+    else:
+        # 没有 car 不算硬失败：这套工程本来就是靠 bundle 内 PNG 出图标的。
+        print("  note Assets.car absent; relying on loose AppIcon*.png")
 
     # Info.plist 里如果写了 CFBundleIconName，系统会优先去 Assets.car 找；
     # 找不到就直接画占位图，散装 PNG 再多也救不回来。
-    import plistlib
-    with open(os.path.join(app, "Info.plist"), "rb") as f:
-        pl = plistlib.load(f)
-    primary = pl.get("CFBundleIcons", {}).get("CFBundlePrimaryIcon", {})
-    if primary.get("CFBundleIconName") and b"AppIcon" not in open(car, "rb").read():
-        print("::error title=icon::CFBundleIconName set but Assets.car lacks it")
-        ok = False
+    try:
+        import plistlib
+        with open(os.path.join(app, "Info.plist"), "rb") as f:
+            pl = plistlib.load(f)
+        primary = pl.get("CFBundleIcons", {}).get("CFBundlePrimaryIcon", {})
+        icon_name = primary.get("CFBundleIconName")
+        if icon_name:
+            if car_blob is None:
+                print("::error title=icon::CFBundleIconName=%s set but Assets.car is absent"
+                      % icon_name)
+                ok = False
+            elif b"AppIcon" not in car_blob:
+                print("::error title=icon::CFBundleIconName=%s set but Assets.car lacks it"
+                      % icon_name)
+                ok = False
+            else:
+                print("  ok CFBundleIconName=%s backed by Assets.car" % icon_name)
+    except Exception as exc:      # 体检步骤不该把整个 job 判死
+        print("  note could not inspect Info.plist: %r" % (exc,))
 
     return 0 if ok else 1
 

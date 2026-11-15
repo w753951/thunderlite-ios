@@ -30,8 +30,6 @@
 				<string>AppIcon40x40</string>
 				<string>AppIcon29x29</string>
 			</array>
-			<key>CFBundleIconName</key>
-			<string>AppIcon</string>
 		</dict>
 	</dict>
 	<key>CFBundleIcons~ipad</key>
@@ -45,8 +43,6 @@
 				<string>AppIcon40x40</string>
 				<string>AppIcon29x29</string>
 			</array>
-			<key>CFBundleIconName</key>
-			<string>AppIcon</string>
 		</dict>
 	</dict>
 	<key>LSRequiresIPhoneOS</key>

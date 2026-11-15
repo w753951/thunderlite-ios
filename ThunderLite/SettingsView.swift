@@ -8,150 +8,283 @@ struct SettingsView: View {
   @State private var editingSite: NetdiskSite?
 
   var body: some View {
-    NavigationView {
-      Form {
-        download
-        netdisk
-        about
-      }
-      .navigationTitle("设置")
-      .navigationBarTitleDisplayMode(.inline)
-      .toolbar {
-        ToolbarItem(placement: .navigationBarTrailing) {
-          Button("完成") { dismiss() }
+    ZStack {
+      AuroraBackground()
+
+      ScrollView {
+        VStack(spacing: 20) {
+          downloadSection
+          netdiskSection
+          aboutSection
         }
-      }
-      .sheet(item: $editingSite) { site in
-        CookieSheet(site: site).environmentObject(prefs)
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
+        .padding(.bottom, 40)
       }
     }
-    .navigationViewStyle(.stack)
-  }
-
-  // MARK: - 下载
-
-  private var download: some View {
-    Section {
-      VStack(alignment: .leading, spacing: 8) {
-        HStack {
-          Text("线程数")
-          Spacer()
-          Text("\(prefs.threads)")
-            .foregroundColor(Color.secondary)
-            .monospacedDigit()
-        }
-        Slider(
-          value: Binding(
-            get: { Double(prefs.threads) },
-            set: { prefs.threads = Int($0.rounded()) }
-          ),
-          in: 1...32,
-          step: 1
-        )
-        Text("网盘会自动收窄并发：夸克 32、百度 8、阿里 4 —— 开太高会被 CDN 限流。")
-          .font(.footnote)
-          .foregroundColor(Color.secondary)
-      }
-
-      Toggle(isOn: $prefs.useSystemDownloads) {
-        VStack(alignment: .leading, spacing: 2) {
-          Text("存到系统 Downloads")
-          Text(prefs.systemDownloadsAvailable
-               ? "/var/mobile/Downloads"
-               : "本机不可写，会自动用 App 目录")
-            .font(.footnote)
-            .foregroundColor(Color.secondary)
-        }
-      }
-      .disabled(!prefs.systemDownloadsAvailable)
-
-      Toggle("下载时保持屏幕常亮", isOn: $prefs.keepAwake)
-
-      Button {
-        DirOpener.open(prefs.saveDirectory())
-      } label: {
-        HStack {
-          Text("当前目录")
-            .foregroundColor(Color.primary)
-          Spacer()
-          Text(prefs.saveDirectoryLabel())
-            .font(.footnote)
-            .foregroundColor(Color.secondary)
-            .lineLimit(1)
-            .truncationMode(.middle)
-          Image(systemName: "arrow.up.forward.app")
-            .font(.footnote.weight(.semibold))
-            .foregroundColor(Color.accentColor)
-        }
-      }
-    } header: {
-      Text("下载")
-    } footer: {
-      Text("点「当前目录」会在 Filza 里打开这个文件夹；没装 Filza 就退回「文件」App。")
+    .safeAreaInset(edge: .top, spacing: 0) { topBar }
+    .sheet(item: $editingSite) { site in
+      CookieSheet(site: site).environmentObject(prefs)
     }
   }
 
-  // MARK: - 网盘
+  // MARK: 顶栏
 
-  private var netdisk: some View {
-    Section {
-      ForEach(NetdiskSupport.sites, id: \.key) { site in
-        Button {
-          editingSite = site
-        } label: {
-          HStack(spacing: 10) {
-            Circle()
-              .fill(Color(hex: site.color))
-              .frame(width: 8, height: 8)
-            VStack(alignment: .leading, spacing: 2) {
-              Text(site.name)
-                .foregroundColor(Color.primary)
-              Text(cookieHint(site))
-                .font(.footnote)
-                .foregroundColor(Color.secondary)
-            }
+  private var topBar: some View {
+    HStack {
+      Text("设置")
+        .font(.system(size: 22, weight: .bold, design: .rounded))
+        .foregroundColor(Theme.textPrimary)
+      Spacer()
+      Button { dismiss() } label: {
+        Text("完成")
+          .font(.system(size: 13, weight: .semibold))
+          .foregroundColor(Theme.bgDeep)
+          .padding(.horizontal, 16)
+          .padding(.vertical, 8)
+          .background(Capsule().fill(Theme.accentGradient))
+          .shadow(color: Theme.accent.opacity(0.35), radius: 9, x: 0, y: 3)
+      }
+      .buttonStyle(.plain)
+    }
+    .padding(.horizontal, 20)
+    .padding(.top, 8)
+    .padding(.bottom, 14)
+    .background(
+      Theme.bgDeep.opacity(0.72)
+        .background(.ultraThinMaterial)
+        .ignoresSafeArea(edges: .top)
+    )
+  }
+
+  // MARK: 分区标题
+
+  private func sectionLabel(_ text: String) -> some View {
+    HStack(spacing: 7) {
+      Rectangle()
+        .fill(Theme.accentGradient)
+        .frame(width: 2.5, height: 11)
+        .clipShape(Capsule())
+      Text(text)
+        .font(.system(size: 11, weight: .bold))
+        .tracking(1.6)
+        .foregroundColor(Theme.textTertiary)
+      Spacer()
+    }
+  }
+
+  // MARK: 下载
+
+  private var downloadSection: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      sectionLabel("下载")
+
+      VStack(spacing: 0) {
+        // 线程数
+        VStack(alignment: .leading, spacing: 11) {
+          HStack {
+            Text("线程数")
+              .font(.system(size: 14, weight: .medium))
+              .foregroundColor(Theme.textPrimary)
             Spacer()
-            if site.sendCookie || prefs.cookieLength(for: site.key) > 0 {
-              Text(prefs.cookieLength(for: site.key) > 0 ? "已填" : "未填")
-                .font(.footnote)
-                .foregroundColor(prefs.cookieLength(for: site.key) > 0 ? Color.green : Color.orange)
-            }
-            Image(systemName: "chevron.right")
-              .font(.footnote.weight(.semibold))
-              .foregroundColor(Color(white: 0.4))
+            Text("\(prefs.threads)")
+              .font(.system(size: 15, weight: .bold, design: .rounded))
+              .monospacedDigit()
+              .foregroundColor(Theme.accent)
           }
+
+          Slider(
+            value: Binding(
+              get: { Double(prefs.threads) },
+              set: { prefs.threads = Int($0.rounded()) }
+            ),
+            in: 1...32,
+            step: 1
+          )
+          .accentColor(Theme.accent)
+
+          Text("网盘会自动收窄并发：夸克 32、百度 8、阿里 4 —— 开太高会被 CDN 限流。")
+            .font(.system(size: 11))
+            .foregroundColor(Theme.textTertiary)
+            .fixedSize(horizontal: false, vertical: true)
         }
+        .padding(14)
+
+        divider
+
+        // 系统 Downloads
+        settingToggle(
+          title: "存到系统 Downloads",
+          subtitle: prefs.systemDownloadsAvailable
+            ? "/var/mobile/Downloads"
+            : "本机不可写，会自动用 App 目录",
+          isOn: $prefs.useSystemDownloads,
+          enabled: prefs.systemDownloadsAvailable)
+
+        divider
+
+        settingToggle(
+          title: "下载时保持屏幕常亮",
+          subtitle: nil,
+          isOn: $prefs.keepAwake,
+          enabled: true)
+
+        divider
+
+        // 当前目录
+        Button { DirOpener.open(prefs.saveDirectory()) } label: {
+          HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+              Text("当前目录")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(Theme.textPrimary)
+              Text(prefs.saveDirectoryLabel())
+                .font(.system(size: 11))
+                .foregroundColor(Theme.textTertiary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            }
+            Spacer(minLength: 8)
+            Image(systemName: "arrow.up.forward.app")
+              .font(.system(size: 13, weight: .semibold))
+              .foregroundColor(Theme.accent)
+          }
+          .padding(14)
+          .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
       }
-    } header: {
-      Text("网盘")
-    } footer: {
-      Text("从浏览器里登录网盘，把请求头里的 Cookie 整条复制进来。夸克与 UC 默认不带 Cookie（带了可能被按账号限速），但需要登录才能下的文件可以进详情页打开「强制带上 Cookie」。")
+      .glassCard(radius: 16)
+
+      Text("点「当前目录」会在 Filza 里打开这个文件夹；没装 Filza 就退回「文件」App。")
+        .font(.system(size: 10))
+        .foregroundColor(Theme.textTertiary.opacity(0.8))
+        .padding(.leading, 4)
     }
   }
 
-  /// 每个站点一行状态说明。夸克/UC 要区分「没填」和「填了但在强制」。
+  private var divider: some View {
+    Rectangle()
+      .fill(Color.white.opacity(0.055))
+      .frame(height: 1)
+      .padding(.leading, 14)
+  }
+
+  private func settingToggle(title: String, subtitle: String?,
+                             isOn: Binding<Bool>, enabled: Bool) -> some View {
+    Toggle(isOn: isOn) {
+      VStack(alignment: .leading, spacing: 2) {
+        Text(title)
+          .font(.system(size: 14, weight: .medium))
+          .foregroundColor(enabled ? Theme.textPrimary : Theme.textTertiary)
+        if let subtitle {
+          Text(subtitle)
+            .font(.system(size: 11))
+            .foregroundColor(Theme.textTertiary)
+        }
+      }
+    }
+    .tint(Theme.accent)
+    .padding(14)
+    .disabled(!enabled)
+  }
+
+  // MARK: 网盘
+
+  private var netdiskSection: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      sectionLabel("网盘")
+
+      VStack(spacing: 0) {
+        ForEach(Array(NetdiskSupport.sites.enumerated()), id: \.element.key) { idx, site in
+          Button { editingSite = site } label: {
+            HStack(spacing: 11) {
+              // 站点色点
+              Circle()
+                .fill(Color(hex: site.color))
+                .frame(width: 9, height: 9)
+                .shadow(color: Color(hex: site.color).opacity(0.6), radius: 5, x: 0, y: 0)
+
+              VStack(alignment: .leading, spacing: 2) {
+                Text(site.name)
+                  .font(.system(size: 14, weight: .medium))
+                  .foregroundColor(Theme.textPrimary)
+                Text(cookieHint(site))
+                  .font(.system(size: 10))
+                  .foregroundColor(Theme.textTertiary)
+                  .lineLimit(1)
+                  .truncationMode(.tail)
+              }
+
+              Spacer(minLength: 8)
+
+              if site.sendCookie || prefs.cookieLength(for: site.key) > 0 {
+                let filled = prefs.cookieLength(for: site.key) > 0
+                Text(filled ? "已填" : "未填")
+                  .font(.system(size: 9, weight: .bold))
+                  .padding(.horizontal, 7)
+                  .padding(.vertical, 3)
+                  .background(
+                    Capsule().fill((filled ? Color(hex: 0x35E08A) : Theme.accentWarm).opacity(0.14))
+                  )
+                  .overlay(
+                    Capsule().strokeBorder(
+                      (filled ? Color(hex: 0x35E08A) : Theme.accentWarm).opacity(0.3),
+                      lineWidth: 1)
+                  )
+                  .foregroundColor(filled ? Color(hex: 0x35E08A) : Theme.accentWarm)
+              }
+
+              Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(Theme.textTertiary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+
+          if idx < NetdiskSupport.sites.count - 1 { divider }
+        }
+      }
+      .glassCard(radius: 16)
+
+      Text("从浏览器登录网盘，把请求头里的 Cookie 整条复制进来。夸克与 UC 默认不带 Cookie。")
+        .font(.system(size: 10))
+        .foregroundColor(Theme.textTertiary.opacity(0.8))
+        .padding(.leading, 4)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+  }
+
   private func cookieHint(_ site: NetdiskSite) -> String {
     if site.sendCookie { return "需要 Cookie" }
-    if prefs.cookieLength(for: site.key) == 0 { return "可选，默认不带（带了反而可能被限速）" }
-    return prefs.isCookieForced(for: site.key)
-      ? "已填 · 正在强制带上"
-      : "已填 · 默认不发送"
+    if prefs.cookieLength(for: site.key) == 0 { return "可选，默认不带" }
+    return prefs.isCookieForced(for: site.key) ? "已填 · 强制带上" : "已填 · 默认不发送"
   }
 
-  // MARK: - 关于
+  // MARK: 关于
 
-  private var about: some View {
-    Section {
+  private var aboutSection: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      sectionLabel("关于")
       HStack {
         Text("版本")
+          .font(.system(size: 14, weight: .medium))
+          .foregroundColor(Theme.textPrimary)
         Spacer()
         Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
-          .foregroundColor(Color.secondary)
+          .font(.system(size: 13, weight: .semibold, design: .rounded))
+          .foregroundColor(Theme.textSecondary)
       }
-    } header: {
-      Text("关于")
-    } footer: {
-      Text("最多 32 线程分块 · 断点续传 · 8 家网盘直链")
+      .padding(14)
+      .glassCard(radius: 16)
+
+      Text("32 线程分块 · 断点续传 · 8 家网盘直链")
+        .font(.system(size: 10))
+        .foregroundColor(Theme.textTertiary.opacity(0.8))
+        .padding(.leading, 4)
     }
   }
 }
@@ -169,77 +302,163 @@ struct CookieSheet: View {
   @State private var text = ""
 
   var body: some View {
-    NavigationView {
-      Form {
-        Section {
-          TextEditor(text: $text)
-            .frame(minHeight: 160)
-            .font(.system(.footnote, design: .monospaced))
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-        } header: {
-          Text("\(site.name) 的 Cookie")
-        } footer: {
-          Text(cookieHelp)
-        }
+    ZStack {
+      AuroraBackground()
 
-        if !site.sendCookie {
-          Section {
-            Toggle("强制带上 Cookie", isOn: Binding(
-              get: { prefs.isCookieForced(for: site.key) },
-              set: { prefs.setCookieForced($0, for: site.key) }
-            ))
-          } footer: {
-            Text("默认不发。这个网盘如果按账号限速，带上会掉到 ~130 KB/s；但遇到「必须登录才能下」的文件，打开它再试。")
+      ScrollView {
+        VStack(spacing: 18) {
+          // Cookie 输入
+          VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 7) {
+              Circle()
+                .fill(Color(hex: site.color))
+                .frame(width: 8, height: 8)
+              Text("\(site.name) 的 Cookie")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundColor(Theme.textSecondary)
+            }
+
+            TextEditor(text: $text)
+              .font(.system(size: 12, design: .monospaced))
+              .foregroundColor(Theme.textPrimary)
+              .textInputAutocapitalization(.never)
+              .autocorrectionDisabled()
+              .scrollContentBackgroundHidden()
+              .frame(minHeight: 150)
+              .padding(10)
+              .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                  .fill(Color.black.opacity(0.28))
+              )
+              .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                  .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
+              )
+
+            Text(cookieHelp)
+              .font(.system(size: 10))
+              .foregroundColor(Theme.textTertiary)
+              .fixedSize(horizontal: false, vertical: true)
           }
-        }
+          .padding(14)
+          .glassCard(radius: 16)
 
-        if prefs.cookieLength(for: site.key) > 0 {
-          Section {
+          // 强制 Cookie
+          if !site.sendCookie {
+            VStack(alignment: .leading, spacing: 8) {
+              Toggle(isOn: Binding(
+                get: { prefs.isCookieForced(for: site.key) },
+                set: { prefs.setCookieForced($0, for: site.key) }
+              )) {
+                Text("强制带上 Cookie")
+                  .font(.system(size: 14, weight: .medium))
+                  .foregroundColor(Theme.textPrimary)
+              }
+              .tint(Theme.accent)
+
+              Text("默认不发。这个网盘如果按账号限速，带上会掉到 ~130 KB/s；但遇到「必须登录才能下」的文件，打开它再试。")
+                .font(.system(size: 10))
+                .foregroundColor(Theme.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(14)
+            .glassCard(radius: 16)
+          }
+
+          // 操作
+          VStack(spacing: 10) {
             Button {
               if let clip = UIPasteboard.general.string, !clip.isEmpty {
                 text = clip.trimmingCharacters(in: .whitespacesAndNewlines)
               }
             } label: {
-              Label("从剪贴板粘贴", systemImage: "doc.on.clipboard")
-            }
-            Button(role: .destructive) {
-              prefs.setCookie("", for: site.key)
-              text = ""
-            } label: {
-              Text("清除这个网盘的 Cookie")
-            }
-          }
-        } else {
-          Section {
-            Button {
-              if let clip = UIPasteboard.general.string, !clip.isEmpty {
-                text = clip.trimmingCharacters(in: .whitespacesAndNewlines)
+              HStack(spacing: 7) {
+                Image(systemName: "doc.on.clipboard")
+                  .font(.system(size: 12, weight: .semibold))
+                Text("从剪贴板粘贴")
+                  .font(.system(size: 13, weight: .semibold))
               }
-            } label: {
-              Label("从剪贴板粘贴", systemImage: "doc.on.clipboard")
+              .foregroundColor(Theme.accent)
+              .frame(maxWidth: .infinity)
+              .padding(.vertical, 13)
+              .background(
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                  .fill(Theme.accent.opacity(0.10))
+              )
+              .overlay(
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                  .strokeBorder(Theme.accent.opacity(0.24), lineWidth: 1)
+              )
+            }
+            .buttonStyle(.plain)
+
+            if prefs.cookieLength(for: site.key) > 0 {
+              Button {
+                prefs.setCookie("", for: site.key)
+                text = ""
+              } label: {
+                Text("清除这个网盘的 Cookie")
+                  .font(.system(size: 13, weight: .medium))
+                  .foregroundColor(Color(hex: 0xFF5E6E))
+                  .frame(maxWidth: .infinity)
+                  .padding(.vertical, 13)
+                  .background(
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                      .fill(Color(hex: 0xFF5E6E).opacity(0.09))
+                  )
+              }
+              .buttonStyle(.plain)
             }
           }
         }
-      }
-      .navigationTitle(site.name)
-      .navigationBarTitleDisplayMode(.inline)
-      .toolbar {
-        ToolbarItem(placement: .navigationBarLeading) {
-          Button("取消") { dismiss() }
-        }
-        ToolbarItem(placement: .navigationBarTrailing) {
-          Button("保存") {
-            prefs.setCookie(text, for: site.key)
-            dismiss()
-          }
-        }
-      }
-      .onAppear {
-        text = prefs.cookie(for: site.key) ?? ""
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
+        .padding(.bottom, 40)
       }
     }
-    .navigationViewStyle(.stack)
+    .safeAreaInset(edge: .top, spacing: 0) {
+      HStack {
+        Button { dismiss() } label: {
+          Text("取消")
+            .font(.system(size: 13, weight: .medium))
+            .foregroundColor(Theme.textSecondary)
+        }
+        .buttonStyle(.plain)
+
+        Spacer()
+
+        Text(site.name)
+          .font(.system(size: 15, weight: .bold, design: .rounded))
+          .foregroundColor(Theme.textPrimary)
+
+        Spacer()
+
+        Button {
+          prefs.setCookie(text, for: site.key)
+          dismiss()
+        } label: {
+          Text("保存")
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundColor(Theme.bgDeep)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(Capsule().fill(Theme.accentGradient))
+            .shadow(color: Theme.accent.opacity(0.35), radius: 9, x: 0, y: 3)
+        }
+        .buttonStyle(.plain)
+      }
+      .padding(.horizontal, 20)
+      .padding(.top, 8)
+      .padding(.bottom, 14)
+      .background(
+        Theme.bgDeep.opacity(0.72)
+          .background(.ultraThinMaterial)
+          .ignoresSafeArea(edges: .top)
+      )
+    }
+    .onAppear {
+      text = prefs.cookie(for: site.key) ?? ""
+    }
   }
 
   private var cookieHelp: String {
@@ -250,6 +469,20 @@ struct CookieSheet: View {
       return "关键字段是 BDUSS 和 STOKEN，形如 BDUSS=xxx; STOKEN=yyy。"
     default:
       return "格式与浏览器请求头里一致，多个字段用分号加空格分隔。只存在这台设备上。"
+    }
+  }
+}
+
+// MARK: - iOS 15 兼容
+
+extension View {
+  /// iOS 16 才有 `scrollContentBackground(.hidden)`，这里按版本分派。
+  @ViewBuilder
+  func scrollContentBackgroundHidden() -> some View {
+    if #available(iOS 16.0, *) {
+      self.scrollContentBackground(.hidden)
+    } else {
+      self
     }
   }
 }
