@@ -43,7 +43,6 @@ enum VideoPageResolver {
           completion(.failure(e))
         }
       }
-
     case .bilibili:
       BilibiliResolver.resolve(from: text, completion: completion)
 

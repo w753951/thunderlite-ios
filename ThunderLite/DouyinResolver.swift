@@ -83,17 +83,17 @@ enum ShortLinkResolver {
       }
 
       // 3xx：跟 Location
-      if (300...399).contains(http.statusCode),
-         let loc = http.response?.url.flatMap({ _ in
-           (resp as? HTTPURLResponse)?.value(forHTTPHeaderField: "Location")
-         }).flatMap({ URL(string: $0, relativeTo: url) }) {
-        resolve(loc.absoluteURL, hops: hops + 1, completion: completion)
-        return
+      if (300...399).contains(http.statusCode) {
+        if let locStr = http.value(forHTTPHeaderField: "Location"),
+           let loc = URL(string: locStr, relativeTo: url)?.absoluteURL {
+          resolve(loc, hops: hops + 1, completion: completion)
+          return
+        }
+        // 没有 Location 却有 data，继续往下扒 HTML
       }
 
       // 200：看最终 URL 有没有变（URLSession 会自己跟一部分）
-      if let finalURL = resp?.url, finalURL != url,
-         finalURL.absoluteString != url.absoluteString {
+      if let finalURL = http.url, finalURL.absoluteString != url.absoluteString {
         completion(finalURL)
         return
       }
@@ -162,7 +162,7 @@ enum DouyinResolver {
     let isImagePost: Bool
   }
 
-  enum ResolveError: LocalizedError {
+  enum DouyinError: LocalizedError {
     case notDouyinLink
     case resolveFailed(String)
     case noMedia
@@ -183,13 +183,13 @@ enum DouyinResolver {
 
   /// 从任意文本解析出抖音媒体。
   static func resolve(from text: String,
-                      completion: @escaping (Swift.Result<Result, Error>) -> Void) {
+                      completion: @escaping (Swift.Result<DouyinResolver.Result, Error>) -> Void) {
     guard let url = ShareTextParser.extractURL(from: text) else {
-      completion(.failure(ResolveError.resolveFailed("文本里没找到链接。")))
+      completion(.failure(DouyinError.resolveFailed("文本里没找到链接。")))
       return
     }
     guard isDouyin(url) else {
-      completion(.failure(ResolveError.notDouyinLink))
+      completion(.failure(DouyinError.notDouyinLink))
       return
     }
 
@@ -202,7 +202,7 @@ enum DouyinResolver {
 
     ShortLinkResolver.resolve(url) { finalURL in
       guard let finalURL else {
-        completion(.failure(ResolveError.resolveFailed("短链展开失败。")))
+        completion(.failure(DouyinError.resolveFailed("短链展开失败。")))
         return
       }
       fetchItem(from: finalURL, completion: completion)
@@ -232,7 +232,7 @@ enum DouyinResolver {
   // MARK: 接口 → 页面降级
 
   private static func fetchItem(from url: URL,
-                                completion: @escaping (Swift.Result<Result, Error>) -> Void) {
+                                completion: @escaping (Swift.Result<DouyinResolver.Result, Error>) -> Void) {
     guard let id = itemID(from: url) else {
       // 没有 id 就只能扒页面
       scrapePage(url, completion: completion)
@@ -322,7 +322,7 @@ enum DouyinResolver {
 
   /// 扒详情页里内嵌的 JSON（RENDER_DATA / __INITIAL_STATE__）。
   private static func scrapePage(_ url: URL,
-                                 completion: @escaping (Swift.Result<Result, Error>) -> Void) {
+                                 completion: @escaping (Swift.Result<DouyinResolver.Result, Error>) -> Void) {
     var req = URLRequest(url: url, timeoutInterval: 20)
     req.setValue(
       "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
@@ -331,7 +331,7 @@ enum DouyinResolver {
     URLSession.shared.dataTask(with: req) { data, _, err in
       guard let data, let html = String(data: data, encoding: .utf8) else {
         DispatchQueue.main.async {
-          completion(.failure(ResolveError.resolveFailed(
+          completion(.failure(DouyinError.resolveFailed(
             err?.localizedDescription ?? "页面读取失败。")))
         }
         return
@@ -371,7 +371,7 @@ enum DouyinResolver {
 
       DispatchQueue.main.async {
         if playURLs.isEmpty {
-          completion(.failure(ResolveError.noMedia))
+          completion(.failure(DouyinError.noMedia))
         } else {
           completion(.success(Result(title: title, playURLs: playURLs,
                                      imageURLs: [], author: "", isImagePost: false)))

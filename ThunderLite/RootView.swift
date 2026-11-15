@@ -493,36 +493,39 @@ struct RootView: View {
       submitting = true
       errorText = nil
       VideoPageResolver.resolve(from: raw) { result in
-        submitting = false
-        switch result {
-        case .success(let bundle):
-          var added = 0
-          for u in bundle.videos.prefix(4) {
-            if (try? engine.add(url: u.absoluteString,
-                                saveTo: prefs.saveDirectory(),
-                                threads: prefs.threads,
-                                extraHeaders: ["Referer": referer(for: site)])) != nil {
-              added += 1
+        // 解析回调可能在后台线程，回主线程改状态
+        Task { @MainActor in
+          submitting = false
+          switch result {
+          case .success(let bundle):
+            var added = 0
+            for u in bundle.videos.prefix(4) {
+              if (try? engine.add(url: u.absoluteString,
+                                  saveTo: prefs.saveDirectory(),
+                                  threads: prefs.threads,
+                                  extraHeaders: ["Referer": referer(for: site)])) != nil {
+                added += 1
+              }
             }
-          }
-          for u in bundle.images.prefix(20) {
-            if (try? engine.add(url: u.absoluteString,
-                                saveTo: prefs.saveDirectory(),
-                                threads: 8,
-                                extraHeaders: ["Referer": referer(for: site)])) != nil {
-              added += 1
+            for u in bundle.images.prefix(20) {
+              if (try? engine.add(url: u.absoluteString,
+                                  saveTo: prefs.saveDirectory(),
+                                  threads: 8,
+                                  extraHeaders: ["Referer": referer(for: site)])) != nil {
+                added += 1
+              }
             }
+            if added > 0 {
+              input = ""
+              inputFocused = false
+              syncKeepAwake()
+            } else {
+              errorText = "解析到了内容但没能加入下载队列。"
+            }
+          case .failure(let err):
+            errorText = (err as? LocalizedError)?.errorDescription
+              ?? err.localizedDescription
           }
-          if added > 0 {
-            input = ""
-            inputFocused = false
-            syncKeepAwake()
-          } else {
-            errorText = "解析到了内容但没能加入下载队列。"
-          }
-        case .failure(let err):
-          errorText = (err as? LocalizedError)?.errorDescription
-            ?? err.localizedDescription
         }
       }
       return
