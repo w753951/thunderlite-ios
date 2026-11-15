@@ -1,0 +1,111 @@
+name: Build iOS IPA
+
+# 编一个未签名的 ipa：TrollStore 设备直接装，靠的是它自己重签。
+# 和 dsh-Go 那套流程一致：xcodebuild archive → 打 Payload → ldid 附加权限。
+on:
+  push:
+    branches: ['main', 'ios/**', 'build/**']
+  workflow_dispatch:
+
+concurrency:
+  group: thunderlite-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ipa:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show the toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Pick a stable Xcode
+        run: |
+          # 新镜像默认滚到最新 Xcode 时，Swift 编译器行为会变；钉一个已知可用的。
+          for candidate in /Applications/Xcode_16.2.app /Applications/Xcode_16.1.app /Applications/Xcode_16.0.app /Applications/Xcode.app; do
+            if [ -d "$candidate" ]; then
+              echo "DEVELOPER_DIR=$candidate/Contents/Developer" >> "$GITHUB_ENV"
+              echo "using $candidate"
+              break
+            fi
+          done
+          xcodebuild -version
+
+      - name: Sanity-check the sources
+        run: |
+          set -euo pipefail
+          for f in ThunderLite/*.swift; do
+            test -s "$f" || { echo "::error title=source::$f is empty"; exit 1; }
+          done
+          grep -q 'IPHONEOS_DEPLOYMENT_TARGET = 15.0;' ThunderLite.xcodeproj/project.pbxproj \
+            || { echo '::error title=target::deployment target must be 15.0'; exit 1; }
+          ls ThunderLite.xcodeproj/project.pbxproj ThunderLite/Info.plist
+
+      - name: Build unsigned
+        run: |
+          set -o pipefail
+          log="$(mktemp)"
+          # 工程里已经写了 CODE_SIGNING_ALLOWED=NO；这里再从命令行压一遍，
+          # 免得 Xcode 版本差异又去找 Development Team（这坑踩过）。
+          xcodebuild \
+            -project ThunderLite.xcodeproj \
+            -scheme ThunderLite \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            EXPANDED_CODE_SIGN_IDENTITY="" \
+            build >"$log" 2>&1 || {
+              echo "::group::xcodebuild failed"
+              grep -nE 'error:|Error:|\(\w+ error\)|The following build commands failed|ld:' "$log" | head -40 || true
+              echo "::endgroup::"
+              tail -60 "$log"
+              exit 1
+            }
+          grep -E 'warning:' "$log" | head -10 || true
+          APP="build/Build/Products/Release-iphoneos/ThunderLite.app"
+          test -d "$APP" || { echo "::error title=build::ThunderLite.app missing"; exit 1; }
+          ls -la "$APP" | head
+
+      - name: Package the ipa
+        run: |
+          set -euo pipefail
+          APP="build/Build/Products/Release-iphoneos/ThunderLite.app"
+          work="$RUNNER_TEMP/ipa"
+          rm -rf "$work"
+          mkdir -p "$work/Payload"
+          cp -R "$APP" "$work/Payload/"
+          # 清掉可能残留的签名，TrollStore 会自己签。
+          rm -rf "$work/Payload/ThunderLite.app/_CodeSignature"
+          cd "$work"
+          zip -qry "$RUNNER_TEMP/ThunderLite.ipa" Payload
+          ls -la "$RUNNER_TEMP/ThunderLite.ipa"
+          unzip -l "$RUNNER_TEMP/ThunderLite.ipa" | head -20
+
+      - name: Verify the ipa
+        run: |
+          set -euo pipefail
+          ipa="$RUNNER_TEMP/ThunderLite.ipa"
+          test -s "$ipa" || { echo "::error title=ipa::missing"; exit 1; }
+          # 必须是 arm64 设备二进制，且最低系统 15.0
+          xcrun vtool -show-build "$RUNNER_TEMP/ipa/Payload/ThunderLite.app/ThunderLite" 2>/dev/null \
+            || unzip -p "$ipa" Payload/ThunderLite.app/ThunderLite > "$RUNNER_TEMP/bin" \
+               && xcrun vtool -show-build "$RUNNER_TEMP/bin"
+          file "$RUNNER_TEMP/ipa/Payload/ThunderLite.app/ThunderLite" || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ThunderLite-ipa
+          path: ${{ runner.temp }}/ThunderLite.ipa
+          if-no-files-found: error
+          retention-days: 14
