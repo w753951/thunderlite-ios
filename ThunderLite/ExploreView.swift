@@ -5,6 +5,8 @@ import SwiftUI
 /// 内置浏览器 + 资源嗅探面板。
 struct ExploreView: View {
   @StateObject private var store = SnifferStore()
+  @EnvironmentObject private var prefs: Prefs
+  @ObservedObject private var adStore = AdBlockStore.shared
 
   @State private var addressText = ""
   @State private var committedURL = URL(string: "about:blank")!
@@ -139,6 +141,34 @@ struct ExploreView: View {
           .frame(width: 30, height: 30)
       }
       .buttonStyle(.plain)
+
+      // 设备模拟
+      Menu {
+        Button {
+          prefs.emulateDevice = "phone"
+        } label: {
+          Label("手机", systemImage: prefs.emulateDevice == "phone"
+                ? "checkmark" : "iphone")
+        }
+        Button {
+          prefs.emulateDevice = "tablet"
+        } label: {
+          Label("平板", systemImage: prefs.emulateDevice == "tablet"
+                ? "checkmark" : "ipad")
+        }
+        Button {
+          prefs.emulateDevice = "desktop"
+        } label: {
+          Label("桌面", systemImage: prefs.emulateDevice == "desktop"
+                ? "checkmark" : "desktopcomputer")
+        }
+      } label: {
+        Image(systemName: prefs.emulateDevice == "tablet" ? "ipad"
+              : prefs.emulateDevice == "desktop" ? "desktopcomputer" : "iphone")
+          .font(.system(size: 13, weight: .semibold))
+          .foregroundColor(prefs.emulateDevice == "phone" ? Theme.textSecondary : Theme.accent)
+          .frame(width: 30, height: 30)
+      }
     }
     .padding(.horizontal, 14)
     .padding(.top, 6)
@@ -155,7 +185,10 @@ struct ExploreView: View {
                    pageTitle: $pageTitle,
                    canGoBack: $canGoBack,
                    canGoForward: $canGoForward,
-                   command: $command)
+                   command: $command,
+                   adBlockEnabled: prefs.adBlockEnabled,
+                   userAgent: prefs.emulatedUserAgent)
+      .id(prefs.adBlockVersion)   // 规则重编译后重建 webview
       .opacity(showingHome ? 0 : 1)
       .allowsHitTesting(!showingHome)
   }
@@ -282,6 +315,20 @@ struct ExploreView: View {
         }
 
         Spacer()
+
+        // 拦截计数
+        if prefs.adBlockEnabled && adStore.blockedCount > 0 {
+          HStack(spacing: 4) {
+            Image(systemName: "shield.lefthalf.filled")
+              .font(.system(size: 9))
+            Text("\(adStore.blockedCount)")
+              .font(.system(size: 9, weight: .bold, design: .rounded))
+              .monospacedDigit()
+          }
+          .foregroundColor(Color(hex: 0x35E08A))
+          .padding(.horizontal, 8)
+          .padding(.vertical, 5)
+        }
 
         Button { panelExpanded.toggle() } label: {
           Image(systemName: panelExpanded ? "chevron.down" : "chevron.up")

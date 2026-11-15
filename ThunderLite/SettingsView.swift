@@ -8,20 +8,26 @@ struct SettingsView: View {
   @State private var editingSite: NetdiskSite?
 
   var body: some View {
-    ZStack {
-      AuroraBackground()
+    NavigationView {
+      ZStack {
+        AuroraBackground()
 
-      ScrollView {
-        VStack(spacing: 20) {
-          downloadSection
-          netdiskSection
-          aboutSection
+        ScrollView {
+          VStack(spacing: 20) {
+            navSection
+            downloadSection
+            browserSection
+            netdiskSection
+            aboutSection
+          }
+          .padding(.horizontal, 20)
+          .padding(.top, 8)
+          .padding(.bottom, 40)
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 8)
-        .padding(.bottom, 40)
       }
+      .navigationBarHidden(true)
     }
+    .navigationViewStyle(.stack)
     .safeAreaInset(edge: .top, spacing: 0) { topBar }
     .sheet(item: $editingSite) { site in
       CookieSheet(site: site).environmentObject(prefs)
@@ -74,6 +80,125 @@ struct SettingsView: View {
   }
 
   // MARK: 下载
+
+  private var navSection: some View {
+    VStack(spacing: 0) {
+      NavigationLink { TaskSettingsView() } label: {
+        HStack(spacing: 12) {
+          Image(systemName: "slider.horizontal.3")
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundColor(Theme.accent)
+            .frame(width: 26)
+          Text("任务设置")
+            .font(.system(size: 15, weight: .medium))
+            .foregroundColor(Theme.textPrimary)
+          Spacer()
+          Image(systemName: "chevron.right")
+            .font(.system(size: 11, weight: .bold))
+            .foregroundColor(Theme.textTertiary)
+        }
+        .padding(15)
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+
+      divider
+
+      NavigationLink { CookieManagerView() } label: {
+        HStack(spacing: 12) {
+          Image(systemName: "key.fill")
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundColor(Theme.accent)
+            .frame(width: 26)
+          Text("Cookie 管理")
+            .font(.system(size: 15, weight: .medium))
+            .foregroundColor(Theme.textPrimary)
+          Spacer()
+          Image(systemName: "chevron.right")
+            .font(.system(size: 11, weight: .bold))
+            .foregroundColor(Theme.textTertiary)
+        }
+        .padding(15)
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+    }
+    .glassCard(radius: 16)
+  }
+
+  // MARK: 浏览器
+
+  private var browserSection: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      sectionLabel("浏览器")
+
+      VStack(spacing: 0) {
+        Toggle(isOn: $prefs.adBlockEnabled) {
+          VStack(alignment: .leading, spacing: 2) {
+            Text("启用广告拦截")
+              .font(.system(size: 14, weight: .medium))
+              .foregroundColor(Theme.textPrimary)
+            Text("已拦截：\(AdBlockStore.shared.blockedCount)")
+              .font(.system(size: 11))
+              .foregroundColor(Theme.accentWarm)
+          }
+        }
+        .tint(Theme.accent)
+        .padding(14)
+
+        divider
+
+        Toggle(isOn: $prefs.acceptableAdsEnabled) {
+          Text("可接受的广告")
+            .font(.system(size: 14, weight: .medium))
+            .foregroundColor(Theme.textPrimary)
+        }
+        .tint(Theme.accent)
+        .padding(14)
+        .disabled(!prefs.adBlockEnabled)
+      }
+      .glassCard(radius: 16)
+
+      Text("一些非侵入式广告将加入白名单，以支持关注用户并提供最佳内容的网站。")
+        .font(.system(size: 10))
+        .foregroundColor(Theme.textTertiary.opacity(0.85))
+        .padding(.leading, 4)
+        .fixedSize(horizontal: false, vertical: true)
+
+      // 模拟终端设备
+      VStack(spacing: 0) {
+        HStack(spacing: 12) {
+          Text("模拟终端设备")
+            .font(.system(size: 14, weight: .medium))
+            .foregroundColor(Theme.textPrimary)
+          Spacer()
+          HStack(spacing: 2) {
+            deviceButton("iphone", "phone")
+            deviceButton("ipad", "tablet")
+            deviceButton("desktopcomputer", "desktop")
+          }
+          .padding(3)
+          .background(Capsule().fill(Color.white.opacity(0.06)))
+        }
+        .padding(14)
+      }
+      .glassCard(radius: 16)
+    }
+  }
+
+  private func deviceButton(_ symbol: String, _ value: String) -> some View {
+    Button { prefs.emulateDevice = value } label: {
+      Image(systemName: symbol)
+        .font(.system(size: 13, weight: .semibold))
+        .foregroundColor(prefs.emulateDevice == value ? Theme.bgDeep : Theme.textSecondary)
+        .frame(width: 34, height: 28)
+        .background(
+          RoundedRectangle(cornerRadius: 9, style: .continuous)
+            .fill(prefs.emulateDevice == value ? Color.white.opacity(0.92) : Color.clear)
+        )
+    }
+    .buttonStyle(.plain)
+  }
 
   private var downloadSection: some View {
     VStack(alignment: .leading, spacing: 12) {

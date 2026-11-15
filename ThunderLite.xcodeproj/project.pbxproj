@@ -26,6 +26,9 @@
 		AA0000000000000000D002 /* MediaPreviewSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000E002 /* MediaPreviewSheet.swift */; };
 		AA0000000000000000D003 /* ExploreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000E003 /* ExploreView.swift */; };
 		AA0000000000000000D004 /* MainContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000E004 /* MainContainerView.swift */; };
+		AA0000000000000000F000 /* AdBlocker.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000A000 /* AdBlocker.swift */; };
+		AA0000000000000000F001 /* TaskSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000A001 /* TaskSettingsView.swift */; };
+		AA0000000000000000F002 /* CookieManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000A002 /* CookieManagerView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -50,6 +53,9 @@
 		AA0000000000000000E002 /* MediaPreviewSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaPreviewSheet.swift; sourceTree = "<group>"; };
 		AA0000000000000000E003 /* ExploreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExploreView.swift; sourceTree = "<group>"; };
 		AA0000000000000000E004 /* MainContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainContainerView.swift; sourceTree = "<group>"; };
+		AA0000000000000000A000 /* AdBlocker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdBlocker.swift; sourceTree = "<group>"; };
+		AA0000000000000000A001 /* TaskSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskSettingsView.swift; sourceTree = "<group>"; };
+		AA0000000000000000A002 /* CookieManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookieManagerView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -82,6 +88,9 @@
 				AA00000000000000000016 /* Prefs.swift */,
 				AA00000000000000000017 /* Assets.xcassets */,
 				AA00000000000000000018 /* Info.plist */,
+				AA0000000000000000A000 /* AdBlocker.swift */,
+				AA0000000000000000A001 /* TaskSettingsView.swift */,
+				AA0000000000000000A002 /* CookieManagerView.swift */,
 				AA0000000000000000E000 /* MediaSniffer.swift */,
 				AA0000000000000000E001 /* SniffBrowserView.swift */,
 				AA0000000000000000E002 /* MediaPreviewSheet.swift */,
@@ -189,6 +198,9 @@
 				AA00000000000000000004 /* DownloadEngine.swift in Sources */,
 				AA00000000000000000005 /* NetdiskSupport.swift in Sources */,
 				AA00000000000000000006 /* Prefs.swift in Sources */,
+				AA0000000000000000F000 /* AdBlocker.swift in Sources */,
+				AA0000000000000000F001 /* TaskSettingsView.swift in Sources */,
+				AA0000000000000000F002 /* CookieManagerView.swift in Sources */,
 				AA0000000000000000D000 /* MediaSniffer.swift in Sources */,
 				AA0000000000000000D001 /* SniffBrowserView.swift in Sources */,
 				AA0000000000000000D002 /* MediaPreviewSheet.swift in Sources */,

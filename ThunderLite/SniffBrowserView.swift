@@ -14,6 +14,11 @@ struct SnifferWebView: UIViewRepresentable {
   /// 由外部触发 reload / goBack / goForward。
   @Binding var command: BrowserCommand?
 
+  /// 是否装载广告拦截规则（来自 Prefs）。
+  var adBlockEnabled: Bool = false
+  /// 模拟终端设备 UA；nil 表示用系统默认。
+  var userAgent: String? = nil
+
   func makeCoordinator() -> Coordinator { Coordinator(self) }
 
   func makeUIView(context: Context) -> WKWebView {
@@ -26,7 +31,21 @@ struct SnifferWebView: UIViewRepresentable {
                               forMainFrameOnly: false)
     ucc.addUserScript(script)
     ucc.add(context.coordinator, name: "tlSniffer")
+
+    // 广告拦截的页面内兜底（拦弹窗、杀浮层）
+    if adBlockEnabled {
+      let adScript = WKUserScript(source: AdBlocker.pageScript,
+                                  injectionTime: .atDocumentStart,
+                                  forMainFrameOnly: false)
+      ucc.addUserScript(adScript)
+      ucc.add(context.coordinator, name: "tlAdBlock")
+    }
     cfg.userContentController = ucc
+
+    // 系统级拦截规则
+    if adBlockEnabled, let list = AdBlocker.cachedList {
+      cfg.userContentController.add(list)
+    }
 
     // 允许内联播放，不然 iOS 会强行全屏
     cfg.allowsInlineMediaPlayback = true
@@ -43,6 +62,11 @@ struct SnifferWebView: UIViewRepresentable {
     web.isOpaque = false
     web.backgroundColor = .clear
     web.scrollView.backgroundColor = .clear
+
+    // 模拟终端设备
+    if let ua = userAgent {
+      web.customUserAgent = ua
+    }
 
     context.coordinator.observe(web)
     web.load(URLRequest(url: url))
@@ -72,6 +96,7 @@ struct SnifferWebView: UIViewRepresentable {
 
   static func dismantleUIView(_ web: WKWebView, coordinator: Coordinator) {
     web.configuration.userContentController.removeScriptMessageHandler(forName: "tlSniffer")
+    web.configuration.userContentController.removeScriptMessageHandler(forName: "tlAdBlock")
     web.stopLoading()
     web.navigationDelegate = nil
     web.uiDelegate = nil
@@ -106,9 +131,15 @@ struct SnifferWebView: UIViewRepresentable {
     // JS → Native
     func userContentController(_ ucc: WKUserContentController,
                               didReceive message: WKScriptMessage) {
-      guard message.name == "tlSniffer",
-            let body = message.body as? [String: Any] else { return }
-      Task { @MainActor in parent.store.ingest(body) }
+      if message.name == "tlSniffer",
+         let body = message.body as? [String: Any] {
+        Task { @MainActor in parent.store.ingest(body) }
+        return
+      }
+      if message.name == "tlAdBlock" {
+        let body = message.body
+        Task { @MainActor in AdBlockStore.shared.record(body) }
+      }
     }
 
     func webView(_ web: WKWebView, didFinish navigation: WKNavigation!) {

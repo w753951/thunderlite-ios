@@ -20,6 +20,22 @@ final class Prefs: ObservableObject {
     static let keepAwake = "keepAwake"
     static let cookies = "netdiskCookies"
     static let forcedCookies = "forceCookieSites"
+
+    // 任务设置
+    static let maxConcurrentTasks = "maxConcurrentTasks"
+    static let autoSelectEnabled = "autoSelectEnabled"
+    static let autoSelectVideoHeight = "autoSelectVideoHeight"
+    static let autoSelectAudio = "autoSelectAudio"
+    static let autoSelectImage = "autoSelectImage"
+    static let transcodeVideo = "transcodeVideo"
+    static let transcodeAudio = "transcodeAudio"
+    static let autoSaveAfterDone = "autoSaveAfterDone"
+    static let autoSaveTarget = "autoSaveTarget"
+
+    // 浏览器
+    static let adBlockEnabled = "adBlockEnabled"
+    static let acceptableAdsEnabled = "acceptableAdsEnabled"
+    static let emulateDevice = "emulateDevice"
   }
 
   /// 越狱设备写到 /var/mobile/Downloads。
@@ -35,6 +51,98 @@ final class Prefs: ObservableObject {
   /// 下载中保持屏幕常亮（只在 App 前台时有效）。
   @Published var keepAwake: Bool {
     didSet { defaults.set(keepAwake, forKey: Key.keepAwake) }
+  }
+
+  // MARK: - 任务设置
+
+  /// 同时进行的任务数上限。0 表示不限（Max）。
+  @Published var maxConcurrentTasks: Int {
+    didSet { defaults.set(maxConcurrentTasks, forKey: Key.maxConcurrentTasks) }
+  }
+
+  /// 批量抓取时自动挑最高可用清晰度。
+  @Published var autoSelectEnabled: Bool {
+    didSet { defaults.set(autoSelectEnabled, forKey: Key.autoSelectEnabled) }
+  }
+
+  /// 自动选择的目标清晰度上限：720 / 1080 / 2160 / 0=最高。
+  @Published var autoSelectVideoHeight: Int {
+    didSet { defaults.set(autoSelectVideoHeight, forKey: Key.autoSelectVideoHeight) }
+  }
+
+  @Published var autoSelectAudio: Bool {
+    didSet { defaults.set(autoSelectAudio, forKey: Key.autoSelectAudio) }
+  }
+
+  @Published var autoSelectImage: Bool {
+    didSet { defaults.set(autoSelectImage, forKey: Key.autoSelectImage) }
+  }
+
+  /// 完成后自动转码：视频统一成 mp4(H.264)，音频统一成 m4a。
+  @Published var transcodeVideo: Bool {
+    didSet { defaults.set(transcodeVideo, forKey: Key.transcodeVideo) }
+  }
+
+  @Published var transcodeAudio: Bool {
+    didSet { defaults.set(transcodeAudio, forKey: Key.transcodeAudio) }
+  }
+
+  /// 完成后自动转存到相册。
+  @Published var autoSaveAfterDone: Bool {
+    didSet { defaults.set(autoSaveAfterDone, forKey: Key.autoSaveAfterDone) }
+  }
+
+  /// 转存目标：photos / files / both
+  @Published var autoSaveTarget: String {
+    didSet { defaults.set(autoSaveTarget, forKey: Key.autoSaveTarget) }
+  }
+
+  // MARK: - 浏览器
+
+  @Published var adBlockEnabled: Bool {
+    didSet {
+      defaults.set(adBlockEnabled, forKey: Key.adBlockEnabled)
+      rebuildAdBlock()
+    }
+  }
+
+  @Published var acceptableAdsEnabled: Bool {
+    didSet {
+      defaults.set(acceptableAdsEnabled, forKey: Key.acceptableAdsEnabled)
+      rebuildAdBlock()
+    }
+  }
+
+  /// 模拟终端设备：phone / tablet / desktop
+  @Published var emulateDevice: String {
+    didSet { defaults.set(emulateDevice, forKey: Key.emulateDevice) }
+  }
+
+  /// 规则重编译计数器，界面可监听它来确认生效。
+  @Published private(set) var adBlockVersion: Int = 0
+
+  private func rebuildAdBlock() {
+    guard adBlockEnabled else {
+      AdBlocker.cachedList = nil
+      adBlockVersion += 1
+      return
+    }
+    AdBlocker.compile(allowAcceptable: acceptableAdsEnabled) { [weak self] ok in
+      guard let self else { return }
+      self.adBlockVersion += 1
+    }
+  }
+
+  /// 给 webview 用的模拟 UA。
+  var emulatedUserAgent: String? {
+    switch emulateDevice {
+    case "tablet":
+      return "Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+    case "desktop":
+      return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+    default:
+      return nil   // nil = 用系统默认（iPhone）
+    }
   }
 
   private var cookieStore: [String: String]
@@ -53,6 +161,26 @@ final class Prefs: ObservableObject {
     keepAwake = defaults.object(forKey: Key.keepAwake) as? Bool ?? true
     cookieStore = defaults.dictionary(forKey: Key.cookies) as? [String: String] ?? [:]
     forceCookieStore = Set(defaults.stringArray(forKey: Key.forcedCookies) ?? [])
+
+    maxConcurrentTasks = defaults.object(forKey: Key.maxConcurrentTasks) as? Int ?? 0
+    autoSelectEnabled = defaults.object(forKey: Key.autoSelectEnabled) as? Bool ?? true
+    let h = defaults.integer(forKey: Key.autoSelectVideoHeight)
+    autoSelectVideoHeight = h == 0 ? 1080 : h
+    autoSelectAudio = defaults.object(forKey: Key.autoSelectAudio) as? Bool ?? true
+    autoSelectImage = defaults.object(forKey: Key.autoSelectImage) as? Bool ?? false
+    transcodeVideo = defaults.object(forKey: Key.transcodeVideo) as? Bool ?? false
+    transcodeAudio = defaults.object(forKey: Key.transcodeAudio) as? Bool ?? false
+    autoSaveAfterDone = defaults.object(forKey: Key.autoSaveAfterDone) as? Bool ?? false
+    autoSaveTarget = defaults.string(forKey: Key.autoSaveTarget) ?? "photos"
+
+    adBlockEnabled = defaults.object(forKey: Key.adBlockEnabled) as? Bool ?? true
+    acceptableAdsEnabled = defaults.object(forKey: Key.acceptableAdsEnabled) as? Bool ?? false
+    emulateDevice = defaults.string(forKey: Key.emulateDevice) ?? "phone"
+
+    // 启动时把拦截规则编译好（首次编译要几百毫秒，这里异步做）
+    if adBlockEnabled {
+      AdBlocker.compile(allowAcceptable: acceptableAdsEnabled) { _ in }
+    }
   }
 
   // MARK: - 下载目录
