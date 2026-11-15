@@ -49,6 +49,7 @@ struct RootView: View {
     VStack(spacing: 10) {
       HStack(spacing: 10) {
         TextField("粘贴链接（支持网盘直链）", text: $input)
+          .font(.body)
           .textInputAutocapitalization(.never)
           .autocorrectionDisabled()
           .keyboardType(.URL)
@@ -64,7 +65,7 @@ struct RootView: View {
             pasteFromClipboard()
           } label: {
             Image(systemName: "doc.on.clipboard")
-              .font(.system(size: 19, weight: .medium))
+              .font(.system(size: 22, weight: .medium))
               .frame(width: 46, height: 46)
               .background(Color(white: 0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
           }
@@ -73,7 +74,7 @@ struct RootView: View {
             submit()
           } label: {
             Image(systemName: "arrow.down.circle.fill")
-              .font(.system(size: 24, weight: .semibold))
+              .font(.system(size: 26, weight: .semibold))
               .frame(width: 46, height: 46)
               .background(Color.accentColor.opacity(0.2), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
           }
@@ -86,20 +87,20 @@ struct RootView: View {
         } label: {
           HStack(spacing: 5) {
             Image(systemName: "folder")
-              .font(.system(size: 11))
+              .font(.footnote)
             Text(prefs.saveDirectoryLabel())
-              .font(.system(size: 11))
+              .font(.footnote)
               .lineLimit(1)
               .truncationMode(.middle)
             Image(systemName: "arrow.up.forward.app")
-              .font(.system(size: 10, weight: .semibold))
+              .font(.caption.weight(.semibold))
           }
           .foregroundColor(Color(white: 0.58))
         }
         .buttonStyle(.plain)
         Spacer(minLength: 8)
         Text("\(prefs.threads) 线程")
-          .font(.system(size: 11, weight: .medium))
+          .font(.footnote.weight(.medium))
           .foregroundColor(Color.secondary)
       }
     }
@@ -111,16 +112,16 @@ struct RootView: View {
   private func banner(_ text: String) -> some View {
     HStack(alignment: .top, spacing: 8) {
       Image(systemName: "exclamationmark.triangle.fill")
-        .font(.system(size: 13))
+        .font(.subheadline)
       Text(text)
-        .font(.system(size: 13))
+        .font(.subheadline)
         .fixedSize(horizontal: false, vertical: true)
       Spacer(minLength: 0)
       Button {
         errorText = nil
       } label: {
         Image(systemName: "xmark")
-          .font(.system(size: 11, weight: .bold))
+          .font(.caption.weight(.bold))
       }
     }
     .foregroundColor(Color.orange)
@@ -168,10 +169,10 @@ struct RootView: View {
         .font(.system(size: 54, weight: .thin))
         .foregroundColor(Color(white: 0.35))
       Text("把链接粘到上面")
-        .font(.system(size: 15, weight: .medium))
+        .font(.headline)
         .foregroundColor(Color.secondary)
       Text("支持 HTTP/HTTPS 直链与 8 家网盘\n最多 32 线程分块下载")
-        .font(.system(size: 12))
+        .font(.subheadline)
         .multilineTextAlignment(.center)
         .foregroundColor(Color(white: 0.4))
       Spacer()
@@ -222,19 +223,19 @@ struct TaskRow: View {
       HStack(alignment: .top, spacing: 8) {
         VStack(alignment: .leading, spacing: 3) {
           Text(task.fileName.isEmpty ? "准备中…" : task.fileName)
-            .font(.system(size: 14, weight: .medium))
+            .font(.headline)
             .lineLimit(2)
           HStack(spacing: 6) {
             if let site = task.site {
               Text(site.name)
-                .font(.system(size: 10, weight: .semibold))
+                .font(.caption2.weight(.semibold))
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(Color(hex: site.color).opacity(0.22), in: Capsule())
                 .foregroundColor(Color(hex: site.color))
             }
             Text(subtitle)
-              .font(.system(size: 11))
+              .font(.subheadline)
               .foregroundColor(Color.secondary)
           }
         }
@@ -250,7 +251,7 @@ struct TaskRow: View {
 
       if let error = task.errorText, task.state == .failed {
         Text(error)
-          .font(.system(size: 11))
+          .font(.footnote)
           .foregroundColor(Color.red.opacity(0.85))
           .lineLimit(3)
       }
@@ -281,17 +282,17 @@ struct TaskRow: View {
     switch task.state {
     case .downloading, .probing, .waiting:
       Button { engine.pause(task) } label: {
-        Image(systemName: "pause.circle.fill").font(.system(size: 26))
+        Image(systemName: "pause.circle.fill").font(.system(size: 28))
       }
       .buttonStyle(.plain)
     case .paused, .failed:
       Button { engine.resume(task) } label: {
-        Image(systemName: "play.circle.fill").font(.system(size: 26))
+        Image(systemName: "play.circle.fill").font(.system(size: 28))
       }
       .buttonStyle(.plain)
     case .done:
       Image(systemName: "checkmark.circle.fill")
-        .font(.system(size: 26))
+        .font(.system(size: 28))
         .foregroundColor(Color.green)
     }
   }

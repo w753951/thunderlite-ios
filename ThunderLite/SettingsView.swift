@@ -48,7 +48,7 @@ struct SettingsView: View {
           step: 1
         )
         Text("网盘会自动收窄并发：夸克 32、百度 8、阿里 4 —— 开太高会被 CDN 限流。")
-          .font(.system(size: 11))
+          .font(.footnote)
           .foregroundColor(Color.secondary)
       }
 
@@ -58,7 +58,7 @@ struct SettingsView: View {
           Text(prefs.systemDownloadsAvailable
                ? "/var/mobile/Downloads"
                : "本机不可写，会自动用 App 目录")
-            .font(.system(size: 11))
+            .font(.footnote)
             .foregroundColor(Color.secondary)
         }
       }
@@ -74,12 +74,12 @@ struct SettingsView: View {
             .foregroundColor(Color.primary)
           Spacer()
           Text(prefs.saveDirectoryLabel())
-            .font(.system(size: 11))
+            .font(.footnote)
             .foregroundColor(Color.secondary)
             .lineLimit(1)
             .truncationMode(.middle)
           Image(systemName: "arrow.up.forward.app")
-            .font(.system(size: 11, weight: .semibold))
+            .font(.footnote.weight(.semibold))
             .foregroundColor(Color.accentColor)
         }
       }
@@ -108,17 +108,17 @@ struct SettingsView: View {
               Text(site.sendCookie
                    ? "需要 Cookie"
                    : "不带 Cookie（带了反而被限速）")
-                .font(.system(size: 11))
+                .font(.footnote)
                 .foregroundColor(Color.secondary)
             }
             Spacer()
             if site.sendCookie {
               Text(prefs.cookieLength(for: site.key) > 0 ? "已填" : "未填")
-                .font(.system(size: 12))
+                .font(.footnote)
                 .foregroundColor(prefs.cookieLength(for: site.key) > 0 ? Color.green : Color.orange)
             }
             Image(systemName: "chevron.right")
-              .font(.system(size: 12, weight: .semibold))
+              .font(.footnote.weight(.semibold))
               .foregroundColor(Color(white: 0.4))
           }
         }
@@ -166,7 +166,7 @@ struct CookieSheet: View {
         Section {
           TextEditor(text: $text)
             .frame(minHeight: 140)
-            .font(.system(size: 12, design: .monospaced))
+            .font(.system(.footnote, design: .monospaced))
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
         } header: {

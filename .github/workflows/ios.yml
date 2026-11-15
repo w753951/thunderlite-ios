@@ -23,18 +23,13 @@ jobs:
           sw_vers
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
+          xcrun simctl list runtimes | head -10
 
-      - name: Pick a stable Xcode
-        run: |
-          # 新镜像默认滚到最新 Xcode 时，Swift 编译器行为会变；钉一个已知可用的。
-          for candidate in /Applications/Xcode_16.2.app /Applications/Xcode_16.1.app /Applications/Xcode_16.0.app /Applications/Xcode.app; do
-            if [ -d "$candidate" ]; then
-              echo "DEVELOPER_DIR=$candidate/Contents/Developer" >> "$GITHUB_ENV"
-              echo "using $candidate"
-              break
-            fi
-          done
-          xcodebuild -version
+      # 之前把 Xcode 钉在 16.2，它的 iphonesimulator SDK 是 22C146，
+      # 而镜像里装的模拟器运行时是 22F77/22G86/23A8464/23B86/23C54，
+      # actool 找不到能配对的就报 "No simulator runtime version ... available"，
+      # 编图标时直接失败。镜像默认的 Xcode（16.4）SDK 和那些运行时是配对的，
+      # 所以这里不再钉版本，用镜像默认的。
 
       - name: Sanity-check the sources
         run: |
@@ -113,12 +108,17 @@ jobs:
           xcrun vtool -show-build "$BIN" || true
           grep -q '<string>15.0</string>' ThunderLite/Info.plist \
             || { echo "::error title=minios::MinimumOSVersion is not 15.0"; exit 1; }
-          # 图标必须真的躺在 bundle 里，并且 Info.plist 声明了主图标
+          # 图标：Assets.car 是 iOS 15 SpringBoard 首选，bundle 内 PNG 是兜底，
+          # 两条都要在，任何一条缺了都算失败。
           APP="$RUNNER_TEMP/ipa/Payload/ThunderLite.app"
+          CAR="$APP/Assets.car"
+          test -f "$CAR" || { echo "::error title=icon::Assets.car missing"; exit 1; }
+          ls -la "$CAR"
           for f in AppIcon60x60@2x.png AppIcon60x60@3x.png; do
             test -f "$APP/$f" || { echo "::error title=icon::$f missing from bundle"; exit 1; }
           done
-          ls -la "$APP"/AppIcon* 
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName" "$APP/Info.plist" \
+            || { echo "::error title=icon::CFBundleIconName missing"; exit 1; }
           /usr/libexec/PlistBuddy -c "Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconFiles:0" "$APP/Info.plist" \
-            || { echo "::error title=icon::CFBundleIcons missing from Info.plist"; exit 1; }
+            || { echo "::error title=icon::CFBundleIconFiles missing"; exit 1; }
           unzip -l "$ipa" | tail -5
