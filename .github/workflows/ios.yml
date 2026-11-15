@@ -113,4 +113,11 @@ jobs:
           xcrun vtool -show-build "$BIN" || true
           grep -q '<string>15.0</string>' ThunderLite/Info.plist \
             || { echo "::error title=minios::MinimumOSVersion is not 15.0"; exit 1; }
+          # 图标必须真的编进 Assets.car，并且 Info.plist 里带上主图标名
+          CAR="$RUNNER_TEMP/ipa/Payload/ThunderLite.app/Assets.car"
+          test -f "$CAR" || { echo "::error title=icon::Assets.car missing"; exit 1; }
+          ls -la "$CAR"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName" \
+            "$RUNNER_TEMP/ipa/Payload/ThunderLite.app/Info.plist" \
+            || { echo "::error title=icon::CFBundleIcons missing from Info.plist"; exit 1; }
           unzip -l "$ipa" | tail -5

@@ -81,17 +81,27 @@ struct RootView: View {
       }
 
       HStack(spacing: 6) {
-        Image(systemName: "folder")
-          .font(.system(size: 11))
-        Text(prefs.saveDirectoryLabel())
-          .font(.system(size: 11))
-          .lineLimit(1)
-          .truncationMode(.middle)
-        Spacer()
+        Button {
+          DirOpener.open(prefs.saveDirectory())
+        } label: {
+          HStack(spacing: 5) {
+            Image(systemName: "folder")
+              .font(.system(size: 11))
+            Text(prefs.saveDirectoryLabel())
+              .font(.system(size: 11))
+              .lineLimit(1)
+              .truncationMode(.middle)
+            Image(systemName: "arrow.up.forward.app")
+              .font(.system(size: 10, weight: .semibold))
+          }
+          .foregroundColor(Color(white: 0.58))
+        }
+        .buttonStyle(.plain)
+        Spacer(minLength: 8)
         Text("\(prefs.threads) 线程")
           .font(.system(size: 11, weight: .medium))
+          .foregroundColor(Color.secondary)
       }
-      .foregroundColor(Color.secondary)
     }
     .padding(.horizontal, 16)
     .padding(.top, 8)
@@ -296,5 +306,35 @@ extension Color {
       blue: Double(hex & 0xFF) / 255,
       opacity: 1
     )
+  }
+}
+
+/// 点目录跳到 Filza 里看。
+///
+/// Filza 的 URL 形式在社区里有两种写法，设备上装的是哪个版本我们没法预判，
+/// 所以按顺序试：`filza://view/<路径>` → `filza:///<路径>` → 只唤起 Filza；
+/// 一个都没成功（没装 Filza）就退回「文件」App 的本 App 目录。
+/// 判定标准是 `open` 的 success 回调，不是猜。
+enum DirOpener {
+  static func open(_ dir: URL) {
+    let path = dir.path
+    // 只转义空格一类字符，保留分隔符，Filza 才能按层级解析。
+    let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path
+
+    var candidates: [URL] = []
+    for raw in ["filza://view\(encoded)", "filza://\(encoded)", "filza://", "shareddocuments://\(encoded)"] {
+      if let url = URL(string: raw), !candidates.contains(url) {
+        candidates.append(url)
+      }
+    }
+    attempt(candidates)
+  }
+
+  private static func attempt(_ urls: [URL]) {
+    guard let next = urls.first else { return }
+    let rest = Array(urls.dropFirst())
+    UIApplication.shared.open(next, options: [:]) { ok in
+      if !ok { attempt(rest) }
+    }
   }
 }

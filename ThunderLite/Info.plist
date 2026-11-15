@@ -22,6 +22,11 @@
 	<string>1</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>filza</string>
+		<string>shareddocuments</string>
+	</array>
 	<key>MinimumOSVersion</key>
 	<string>15.0</string>
 	<key>UILaunchScreen</key>

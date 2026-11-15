@@ -66,17 +66,27 @@ struct SettingsView: View {
 
       Toggle("下载时保持屏幕常亮", isOn: $prefs.keepAwake)
 
-      HStack {
-        Text("当前目录")
-        Spacer()
-        Text(prefs.saveDirectoryLabel())
-          .font(.system(size: 11))
-          .foregroundColor(Color.secondary)
-          .lineLimit(1)
-          .truncationMode(.middle)
+      Button {
+        DirOpener.open(prefs.saveDirectory())
+      } label: {
+        HStack {
+          Text("当前目录")
+            .foregroundColor(Color.primary)
+          Spacer()
+          Text(prefs.saveDirectoryLabel())
+            .font(.system(size: 11))
+            .foregroundColor(Color.secondary)
+            .lineLimit(1)
+            .truncationMode(.middle)
+          Image(systemName: "arrow.up.forward.app")
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundColor(Color.accentColor)
+        }
       }
     } header: {
       Text("下载")
+    } footer: {
+      Text("点「当前目录」会在 Filza 里打开这个文件夹；没装 Filza 就退回「文件」App。")
     }
   }
 
