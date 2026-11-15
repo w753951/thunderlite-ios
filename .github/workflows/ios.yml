@@ -108,17 +108,11 @@ jobs:
           xcrun vtool -show-build "$BIN" || true
           grep -q '<string>15.0</string>' ThunderLite/Info.plist \
             || { echo "::error title=minios::MinimumOSVersion is not 15.0"; exit 1; }
-          # 图标：Assets.car 是 iOS 15 SpringBoard 首选，bundle 内 PNG 是兜底，
-          # 两条都要在，任何一条缺了都算失败。
+          # 图标：Assets.car + bundle 内 PNG 都要在，且 PNG 必须是无 alpha 的
+          # 普通 PNG。细节（alpha / CgBI 判定）见 ci/verify_icons.py。
           APP="$RUNNER_TEMP/ipa/Payload/ThunderLite.app"
-          CAR="$APP/Assets.car"
-          test -f "$CAR" || { echo "::error title=icon::Assets.car missing"; exit 1; }
-          ls -la "$CAR"
-          for f in AppIcon60x60@2x.png AppIcon60x60@3x.png; do
-            test -f "$APP/$f" || { echo "::error title=icon::$f missing from bundle"; exit 1; }
-          done
+          ls -la "$APP"/AppIcon*.png
           /usr/libexec/PlistBuddy -c "Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName" "$APP/Info.plist" \
             || { echo "::error title=icon::CFBundleIconName missing"; exit 1; }
-          /usr/libexec/PlistBuddy -c "Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconFiles:0" "$APP/Info.plist" \
-            || { echo "::error title=icon::CFBundleIconFiles missing"; exit 1; }
+          python3 ci/verify_icons.py "$APP"
           unzip -l "$ipa" | tail -5

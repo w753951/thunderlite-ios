@@ -101,8 +101,10 @@ enum NetdiskSupport {
   ///
   /// - Parameter extra: 用户手动补充的头，优先级最高（能覆盖默认值）。
   /// - Parameter cookie: 用户为该网盘填的 Cookie；按 `sendCookie` 决定要不要带。
+  /// - Parameter forceCookie: 对夸克/UC 这类默认不带的站点，强制把 Cookie 带上。
   static func resolve(url: String, extra: [String: String] = [:],
-                      cookie: String? = nil, ua: String? = nil) -> Resolved {
+                      cookie: String? = nil, forceCookie: Bool = false,
+                      ua: String? = nil) -> Resolved {
     let site = site(for: url)
     var headers: [String: String] = [
       "User-Agent": ua ?? defaultUA,
@@ -119,7 +121,7 @@ enum NetdiskSupport {
       headers["Sec-Fetch-Mode"] = "cors"
       headers["Sec-Fetch-Site"] = "same-site"
 
-      if site.sendCookie, let cookie, !cookie.isEmpty {
+      if site.sendCookie || forceCookie, let cookie, !cookie.isEmpty {
         headers["Cookie"] = cookie
       }
     }

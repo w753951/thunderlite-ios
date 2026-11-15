@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct SettingsView: View {
   @EnvironmentObject private var prefs: Prefs
@@ -105,14 +106,12 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 2) {
               Text(site.name)
                 .foregroundColor(Color.primary)
-              Text(site.sendCookie
-                   ? "需要 Cookie"
-                   : "不带 Cookie（带了反而被限速）")
+              Text(cookieHint(site))
                 .font(.footnote)
                 .foregroundColor(Color.secondary)
             }
             Spacer()
-            if site.sendCookie {
+            if site.sendCookie || prefs.cookieLength(for: site.key) > 0 {
               Text(prefs.cookieLength(for: site.key) > 0 ? "已填" : "未填")
                 .font(.footnote)
                 .foregroundColor(prefs.cookieLength(for: site.key) > 0 ? Color.green : Color.orange)
@@ -126,8 +125,17 @@ struct SettingsView: View {
     } header: {
       Text("网盘")
     } footer: {
-      Text("从浏览器里登录网盘、复制请求头里的 Cookie 贴进来。夸克与 UC 不用填——它们按账号限速，匿名反而更快。")
+      Text("从浏览器里登录网盘，把请求头里的 Cookie 整条复制进来。夸克与 UC 默认不带 Cookie（带了可能被按账号限速），但需要登录才能下的文件可以进详情页打开「强制带上 Cookie」。")
     }
+  }
+
+  /// 每个站点一行状态说明。夸克/UC 要区分「没填」和「填了但在强制」。
+  private func cookieHint(_ site: NetdiskSite) -> String {
+    if site.sendCookie { return "需要 Cookie" }
+    if prefs.cookieLength(for: site.key) == 0 { return "可选，默认不带（带了反而可能被限速）" }
+    return prefs.isCookieForced(for: site.key)
+      ? "已填 · 正在强制带上"
+      : "已填 · 默认不发送"
   }
 
   // MARK: - 关于
@@ -165,23 +173,51 @@ struct CookieSheet: View {
       Form {
         Section {
           TextEditor(text: $text)
-            .frame(minHeight: 140)
+            .frame(minHeight: 160)
             .font(.system(.footnote, design: .monospaced))
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
         } header: {
           Text("\(site.name) 的 Cookie")
         } footer: {
-          Text("格式与浏览器请求头里一致，例如 BDUSS=xxx; STOKEN=yyy。只存在这台设备上。")
+          Text(cookieHelp)
+        }
+
+        if !site.sendCookie {
+          Section {
+            Toggle("强制带上 Cookie", isOn: Binding(
+              get: { prefs.isCookieForced(for: site.key) },
+              set: { prefs.setCookieForced($0, for: site.key) }
+            ))
+          } footer: {
+            Text("默认不发。这个网盘如果按账号限速，带上会掉到 ~130 KB/s；但遇到「必须登录才能下」的文件，打开它再试。")
+          }
         }
 
         if prefs.cookieLength(for: site.key) > 0 {
           Section {
+            Button {
+              if let clip = UIPasteboard.general.string, !clip.isEmpty {
+                text = clip.trimmingCharacters(in: .whitespacesAndNewlines)
+              }
+            } label: {
+              Label("从剪贴板粘贴", systemImage: "doc.on.clipboard")
+            }
             Button(role: .destructive) {
               prefs.setCookie("", for: site.key)
               text = ""
             } label: {
               Text("清除这个网盘的 Cookie")
+            }
+          }
+        } else {
+          Section {
+            Button {
+              if let clip = UIPasteboard.general.string, !clip.isEmpty {
+                text = clip.trimmingCharacters(in: .whitespacesAndNewlines)
+              }
+            } label: {
+              Label("从剪贴板粘贴", systemImage: "doc.on.clipboard")
             }
           }
         }
@@ -204,5 +240,16 @@ struct CookieSheet: View {
       }
     }
     .navigationViewStyle(.stack)
+  }
+
+  private var cookieHelp: String {
+    switch site.key {
+    case "quark", "uc":
+      return "只贴 Cookie 的值就行，形如 __puus=xxx; __pus=yyy。从浏览器 F12 → Network → 随便一个请求 → Request Headers → Cookie 整条复制。注意别把 Cookie: 这四个字符带进来。"
+    case "baidu":
+      return "关键字段是 BDUSS 和 STOKEN，形如 BDUSS=xxx; STOKEN=yyy。"
+    default:
+      return "格式与浏览器请求头里一致，多个字段用分号加空格分隔。只存在这台设备上。"
+    }
   }
 }

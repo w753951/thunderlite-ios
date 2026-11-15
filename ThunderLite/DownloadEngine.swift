@@ -69,9 +69,10 @@ final class DownloadEngine: ObservableObject {
   /// 新建一个任务并立刻开跑。返回的任务对象由 `tasks` 持有。
   ///
   /// - Parameter cookie: 该网盘用户填的 Cookie；按站点的 sendCookie 决定要不要带。
+  /// - Parameter forceCookie: 对默认不带的站点（夸克/UC）强制带上 Cookie。
   @discardableResult
   func add(url: String, saveTo directory: URL, threads: Int = EngineLimits.maxThreads,
-           cookie: String? = nil,
+           cookie: String? = nil, forceCookie: Bool = false,
            extraHeaders: [String: String] = [:]) throws -> DownloadTask {
     guard let parsed = URL(string: url.trimmingCharacters(in: .whitespacesAndNewlines)),
           let scheme = parsed.scheme?.lowercased(), ["http", "https"].contains(scheme)
@@ -83,7 +84,8 @@ final class DownloadEngine: ObservableObject {
     }
 
     let resolved = NetdiskSupport.resolve(url: parsed.absoluteString,
-                                         extra: extraHeaders, cookie: cookie)
+                                         extra: extraHeaders, cookie: cookie,
+                                         forceCookie: forceCookie)
     guard let target = URL(string: resolved.url) else { throw EngineError.badURL }
 
     let task = DownloadTask(url: target, saveDir: directory,

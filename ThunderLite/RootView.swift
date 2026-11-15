@@ -195,10 +195,11 @@ struct RootView: View {
     let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !text.isEmpty else { return }
     do {
-      let siteKey = NetdiskSupport.site(for: text)?.key
-      let cookie = siteKey.flatMap { prefs.cookie(for: $0) }
+      let site = NetdiskSupport.site(for: text)
+      let cookie = site.map { prefs.cookie(for: $0.key) } ?? nil
+      let force = site.map { prefs.isCookieForced(for: $0.key) } ?? false
       try engine.add(url: text, saveTo: prefs.saveDirectory(),
-                     threads: prefs.threads, cookie: cookie)
+                     threads: prefs.threads, cookie: cookie, forceCookie: force)
       input = ""
       errorText = nil
       inputFocused = false

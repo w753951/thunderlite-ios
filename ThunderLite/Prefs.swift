@@ -19,6 +19,7 @@ final class Prefs: ObservableObject {
     static let threads = "threads"
     static let keepAwake = "keepAwake"
     static let cookies = "netdiskCookies"
+    static let forcedCookies = "forceCookieSites"
   }
 
   /// 越狱设备写到 /var/mobile/Downloads。
@@ -38,12 +39,20 @@ final class Prefs: ObservableObject {
 
   private var cookieStore: [String: String]
 
+  /// 默认不带 Cookie 的站点（夸克、UC）。用户如果明确要求带，记在这里。
+  ///
+  /// 背景：这两个网盘在 thunder-lite 上实测「带登录 Cookie 反而被按账号限速到
+  /// ~130 KB/s」，所以默认丢掉。但不是所有人都这样，有些文件和账号必须带 Cookie
+  /// 才能下，所以给一个显式开关，别把路堵死。
+  private var forceCookieStore: Set<String>
+
   private init() {
     useSystemDownloads = defaults.bool(forKey: Key.useSystemDownloads)
     let saved = defaults.integer(forKey: Key.threads)
     threads = saved == 0 ? 32 : max(1, min(32, saved))
     keepAwake = defaults.object(forKey: Key.keepAwake) as? Bool ?? true
     cookieStore = defaults.dictionary(forKey: Key.cookies) as? [String: String] ?? [:]
+    forceCookieStore = Set(defaults.stringArray(forKey: Key.forcedCookies) ?? [])
   }
 
   // MARK: - 下载目录
@@ -83,11 +92,42 @@ final class Prefs: ObservableObject {
   }
 
   func setCookie(_ value: String, for siteKey: String) {
-    let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    let text = Self.normalizeCookie(value)
     if text.isEmpty { cookieStore.removeValue(forKey: siteKey) }
     else { cookieStore[siteKey] = text }
     defaults.set(cookieStore, forKey: Key.cookies)
     objectWillChange.send()
+  }
+
+  /// 把用户粘贴进来的内容收拾成能直接塞进请求头的单行 Cookie。
+  ///
+  /// 常见的三种粘法都要能吃：
+  ///   - 整条请求头：`Cookie: __puus=xxx; __pus=yyy`
+  ///   - 多行（DevTools 复制会带换行）
+  ///   - 首尾多余空白 / 引号
+  /// HTTP 头里不允许出现换行，留着会直接让 URLSession 抛错。
+  static func normalizeCookie(_ raw: String) -> String {
+    var text = raw.replacingOccurrences(of: "\r\n", with: " ")
+      .replacingOccurrences(of: "\n", with: " ")
+      .replacingOccurrences(of: "\r", with: " ")
+      .replacingOccurrences(of: "\t", with: " ")
+    text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    // 去掉误粘进来的字段名
+    if let r = text.range(of: "cookie:", options: [.caseInsensitive, .anchored]) {
+      text = String(text[r.upperBound...]).trimmingCharacters(in: .whitespaces)
+    }
+    // 掐掉常见的尾部噪声
+    for tail in [";", "\"", "'"] where text.hasSuffix(tail) {
+      text = String(text.dropLast()).trimmingCharacters(in: .whitespaces)
+    }
+    if text.hasPrefix("\"") || text.hasPrefix("'") {
+      text = String(text.dropFirst()).trimmingCharacters(in: .whitespaces)
+    }
+    // 连续空白压成一个空格
+    while text.contains("  ") {
+      text = text.replacingOccurrences(of: "  ", with: " ")
+    }
+    return text
   }
 
   func cookieLength(for siteKey: String) -> Int {
@@ -95,6 +135,20 @@ final class Prefs: ObservableObject {
   }
 
   var hasAnyCookie: Bool { !cookieStore.isEmpty }
+
+  // MARK: - 强制带 Cookie（夸克 / UC）
+
+  /// 该站点是否强制发送 Cookie。
+  func isCookieForced(for siteKey: String) -> Bool {
+    forceCookieStore.contains(siteKey)
+  }
+
+  func setCookieForced(_ forced: Bool, for siteKey: String) {
+    if forced { forceCookieStore.insert(siteKey) }
+    else { forceCookieStore.remove(siteKey) }
+    defaults.set(Array(forceCookieStore), forKey: Key.forcedCookies)
+    objectWillChange.send()
+  }
 }
 
 /// 屏幕常亮。
