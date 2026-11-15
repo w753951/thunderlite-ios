@@ -103,6 +103,7 @@ struct RootView: View {
   @State private var input = ""
   @State private var errorText: String?
   @State private var showingSettings = false
+  @State private var submitting = false
   @FocusState private var inputFocused: Bool
 
   /// 每秒对一次「该不该常亮」。
@@ -357,6 +358,13 @@ struct RootView: View {
         Image(systemName: isPaste ? "doc.on.clipboard" : "arrow.down")
           .font(.system(size: 17, weight: .bold))
           .foregroundColor(isPaste ? Theme.textSecondary : Theme.bgDeep)
+          .opacity(submitting ? 0 : 1)
+
+        if submitting {
+          ProgressView()
+            .tint(Theme.bgDeep)
+            .scaleEffect(0.8)
+        }
       }
       .frame(width: 48, height: 48)
       .shadow(color: isPaste ? Color.clear : Theme.accent.opacity(0.35),
@@ -470,13 +478,62 @@ struct RootView: View {
   }
 
   private func submit() {
-    let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !text.isEmpty else { return }
+    let raw = input.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !raw.isEmpty else { return }
+
+    guard let parsed = ShareTextParser.extractURL(from: raw) else {
+      errorText = "这段文字里没找到链接。"
+      return
+    }
+
+    let site = VideoPageResolver.site(for: parsed)
+
+    // 视频站走专用解析（抖音 / B 站）
+    if site == .douyin || site == .bilibili {
+      submitting = true
+      errorText = nil
+      VideoPageResolver.resolve(from: raw) { result in
+        submitting = false
+        switch result {
+        case .success(let bundle):
+          var added = 0
+          for u in bundle.videos.prefix(4) {
+            if (try? engine.add(url: u.absoluteString,
+                                saveTo: prefs.saveDirectory(),
+                                threads: prefs.threads,
+                                extraHeaders: ["Referer": referer(for: site)])) != nil {
+              added += 1
+            }
+          }
+          for u in bundle.images.prefix(20) {
+            if (try? engine.add(url: u.absoluteString,
+                                saveTo: prefs.saveDirectory(),
+                                threads: 8,
+                                extraHeaders: ["Referer": referer(for: site)])) != nil {
+              added += 1
+            }
+          }
+          if added > 0 {
+            input = ""
+            inputFocused = false
+            syncKeepAwake()
+          } else {
+            errorText = "解析到了内容但没能加入下载队列。"
+          }
+        case .failure(let err):
+          errorText = (err as? LocalizedError)?.errorDescription
+            ?? err.localizedDescription
+        }
+      }
+      return
+    }
+
+    // 普通直链
     do {
-      let site = NetdiskSupport.site(for: text)
-      let cookie = site.map { prefs.cookie(for: $0.key) } ?? nil
-      let force = site.map { prefs.isCookieForced(for: $0.key) } ?? false
-      try engine.add(url: text, saveTo: prefs.saveDirectory(),
+      let netdisk = NetdiskSupport.site(for: parsed.absoluteString)
+      let cookie = netdisk.map { prefs.cookie(for: $0.key) } ?? nil
+      let force = netdisk.map { prefs.isCookieForced(for: $0.key) } ?? false
+      try engine.add(url: parsed.absoluteString, saveTo: prefs.saveDirectory(),
                      threads: prefs.threads, cookie: cookie, forceCookie: force)
       input = ""
       errorText = nil
@@ -484,6 +541,15 @@ struct RootView: View {
       syncKeepAwake()
     } catch {
       errorText = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    }
+  }
+
+  /// B 站 / 抖音的 CDN 都校验 Referer，不带就 403。
+  private func referer(for site: VideoPageResolver.Site) -> String {
+    switch site {
+    case .bilibili: return "https://www.bilibili.com/"
+    case .douyin: return "https://www.douyin.com/"
+    default: return ""
     }
   }
 

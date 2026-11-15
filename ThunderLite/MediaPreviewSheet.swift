@@ -170,6 +170,10 @@ struct MediaPreviewSheet: View {
         .truncationMode(.middle)
 
       HStack(spacing: 6) {
+        if !media.quality.isEmpty {
+          chip(media.quality,
+               media.isHighQuality ? Theme.accentWarm : Theme.accentAlt)
+        }
         if let size = media.pixelSize {
           chip(size, Theme.accentAlt)
         }
@@ -291,14 +295,23 @@ struct MediaPreviewSheet: View {
   }
 
   private func addToDownloads() {
+    // 这些站点的 CDN 都校验 Referer，不带会 403
+    var headers: [String: String] = [:]
+    if let host = media.url.host {
+      if host.contains("bilibili") || host.contains("hdslb") {
+        headers["Referer"] = "https://www.bilibili.com/"
+      } else if host.contains("douyin") || host.contains("byteimg")
+                  || host.contains("douyinvod") {
+        headers["Referer"] = "https://www.douyin.com/"
+      }
+    }
     do {
-      // 视频/音频走引擎；图片也走同一条（引擎对任意直链都适用）
       try engine.add(url: media.url.absoluteString,
                      saveTo: prefs.saveDirectory(),
-                     threads: prefs.threads)
+                     threads: prefs.threads,
+                     extraHeaders: headers)
       added = true
     } catch {
-      // 失败就把地址交给系统浏览器，让用户自己处理
       UIPasteboard.general.string = media.url.absoluteString
     }
   }

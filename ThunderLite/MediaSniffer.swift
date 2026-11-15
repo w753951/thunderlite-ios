@@ -34,6 +34,12 @@ struct SniffedMedia: Identifiable, Equatable {
   var pixelSize: String?
   /// 来路：xhr / fetch / src / dom，仅用于调试展示。
   var via: String = ""
+  /// 视频清晰度（从 URL 或页面元数据推断），例如 "1080P" / "原画"。
+  var quality: String = ""
+  /// 码率（bps），用于排序挑最高画质。
+  var bandwidth: Int = 0
+  /// 文件大小（如果能从 Content-Length 拿到）。
+  var byteSize: Int64 = 0
 
   static func == (a: SniffedMedia, b: SniffedMedia) -> Bool { a.url == b.url }
 
@@ -54,6 +60,15 @@ struct SniffedMedia: Identifiable, Equatable {
   var isManifest: Bool {
     let p = url.path.lowercased()
     return p.hasSuffix(".m3u8") || p.hasSuffix(".mpd")
+  }
+
+  /// 是否高码率/原画候选。
+  var isHighQuality: Bool {
+    if !quality.isEmpty {
+      return quality.contains("原画") || quality.contains("4K")
+        || quality.contains("2K") || quality.contains("1080")
+    }
+    return bandwidth >= 2_000_000
   }
 }
 
@@ -89,6 +104,9 @@ final class SnifferStore: ObservableObject {
       media.pixelSize = "\(w)×\(h)"
     }
     if let via = body["via"] as? String { media.via = via }
+    if let q = body["q"] as? String, !q.isEmpty { media.quality = q }
+    if let bw = body["bw"] as? Int { media.bandwidth = bw }
+    if let bsz = body["size"] as? Int64 { media.byteSize = bsz }
 
     items.insert(media, at: 0)
     // 上限防止内存无限涨
@@ -105,6 +123,33 @@ final class SnifferStore: ObservableObject {
 
   func count(of kind: MediaKind) -> Int {
     items.reduce(0) { $0 + ($1.kind == kind ? 1 : 0) }
+  }
+
+  /// 按清晰度从高到低排序后的视频列表。
+  ///
+  /// 排序依据：先用 quality 里的数字档位，再用码率，最后用文件大小。
+  var videosByQuality: [SniffedMedia] {
+    items(of: .video).sorted { a, b in
+      qualityRank(a) > qualityRank(b)
+    }
+  }
+
+  /// 最高画质的那一条。
+  var bestVideo: SniffedMedia? {
+    videosByQuality.first
+  }
+
+  private func qualityRank(_ m: SniffedMedia) -> Int {
+    let q = m.quality.uppercased()
+    if q.contains("4K") || q.contains("2160") { return 4000 + m.bandwidth / 1_000_000 }
+    if q.contains("2K") || q.contains("1440") { return 3000 + m.bandwidth / 1_000_000 }
+    if q.contains("1080") { return 2000 + m.bandwidth / 1_000_000 }
+    if q.contains("720") { return 1500 + m.bandwidth / 1_000_000 }
+    if q.contains("480") { return 1000 + m.bandwidth / 1_000_000 }
+    if q.contains("360") { return 500 + m.bandwidth / 1_000_000 }
+    // "原画" 或未知：按码率/尺寸排
+    let base = q.contains("原画") ? 2500 : 800
+    return base + m.bandwidth / 1_000_000
   }
 
   func reset() {
@@ -149,11 +194,79 @@ enum SnifferScript {
       return null;
     };
 
+    // ── 清晰度推断 ──
+    // 从 URL 特征、页面里已知的清晰度标识、视频元素尺寸三处判断。
+    var qualityOf = function (u, extra) {
+      var s = String(u || '').toLowerCase();
+      var q = '';
+
+      // B 站 dash 地址里带 30080/30077 这类 code，数值越高越清晰
+      var m = s.match(/\/(\d{5})\//) || s.match(/_(\d{5})\./);
+      if (m) {
+        var code = parseInt(m[1], 10);
+        if (code >= 30080) { q = '4K'; }
+        else if (code >= 30077) { q = '2K'; }
+        else if (code >= 30064) { q = '1080P'; }
+        else if (code >= 30032) { q = '720P'; }
+        else if (code >= 30016) { q = '480P'; }
+      }
+
+      // 通用：URL 里直接写着 2160/1440/1080/720/480
+      if (!q) {
+        var h = s.match(/(?:^|[^0-9])(2160|1440|1080|720|540|480|360)p?(?:[^0-9]|$)/);
+        if (h) {
+          var v = parseInt(h[1], 10);
+          if (v >= 2160) { q = '4K'; }
+          else if (v >= 1440) { q = '2K'; }
+          else if (v >= 1080) { q = '1080P'; }
+          else if (v >= 720) { q = '720P'; }
+          else { q = v + 'P'; }
+        }
+      }
+
+      // YouTube itag 映射
+      if (!q) {
+        var it = s.match(/[?&]itag=(\d+)/);
+        if (it) {
+          var map = {
+            '313': '4K', '271': '2K', '308': '2K', '299': '1080P', '303': '1080P',
+            '137': '1080P', '298': '720P', '136': '720P', '135': '480P', '134': '360P'
+          };
+          q = map[it[1]] || '';
+        }
+      }
+
+      // 从视频元素的实际分辨率推
+      if (!q && extra && extra.w && extra.h) {
+        var hh = extra.h;
+        if (hh >= 2160) { q = '4K'; }
+        else if (hh >= 1440) { q = '2K'; }
+        else if (hh >= 1080) { q = '1080P'; }
+        else if (hh >= 720) { q = '720P'; }
+        else if (hh >= 480) { q = '480P'; }
+        else { q = hh + 'P'; }
+      }
+
+      // dash 里常带 mime 的 codecs 提示
+      if (!q) {
+        if (/av01|vp09/.test(s) && /1080|1920/.test(s)) { q = '1080P'; }
+      }
+
+      return q || '原画';
+    };
+
     // ── XHR ──
     try {
       var xo = XMLHttpRequest.prototype.open;
       XMLHttpRequest.prototype.open = function (m, u) {
-        try { var k = guess(u); if (k) { post(k, u, { via: 'xhr' }); } } catch (e) {}
+        try {
+          var k = guess(u);
+          if (k) { post(k, u, { via: 'xhr', q: qualityOf(u) }); }
+          else if (/playurl|playinfo|getplay|m3u8|manifest|\.dash/i.test(String(u))) {
+            // 播放地址接口的响应里往往藏着原画直链，先记下这个请求
+            post('video', u, { via: 'api', q: '接口' });
+          }
+        } catch (e) {}
         return xo.apply(this, arguments);
       };
     } catch (e) {}
@@ -166,7 +279,10 @@ enum SnifferScript {
           try {
             var u = (typeof input === 'string') ? input : (input && input.url);
             var k = guess(u);
-            if (k) { post(k, u, { via: 'fetch' }); }
+            if (k) { post(k, u, { via: 'fetch', q: qualityOf(u) }); }
+            else if (/playurl|playinfo|getplay/i.test(String(u))) {
+              post('video', u, { via: 'api', q: '接口' });
+            }
           } catch (e) {}
           return of.apply(this, arguments);
         };
@@ -183,7 +299,10 @@ enum SnifferScript {
           set: function (v) {
             try {
               var k = guess(v) || (this.tagName === 'AUDIO' ? 'audio' : 'video');
-              post(k, v, { via: 'src', tag: this.tagName.toLowerCase() });
+              post(k, v, {
+                via: 'src', tag: this.tagName.toLowerCase(),
+                q: qualityOf(v, { w: this.videoWidth, h: this.videoHeight })
+              });
             } catch (e) {}
             return d.set.call(this, v);
           }
@@ -206,7 +325,8 @@ enum SnifferScript {
             post(guess(u) || 'video', u, {
               via: 'dom', tag: 'video',
               w: el.videoWidth || undefined,
-              h: el.videoHeight || undefined
+              h: el.videoHeight || undefined,
+              q: qualityOf(u, { w: el.videoWidth, h: el.videoHeight })
             });
           }
         }
@@ -264,9 +384,9 @@ struct SniffHomeSite: Identifiable {
 enum SniffHome {
   static let sites: [SniffHomeSite] = [
     .init(name: "Bilibili", url: "https://m.bilibili.com", tint: 0xFB7299),
+    .init(name: "抖音", url: "https://www.douyin.com", tint: 0x00F2EA),
     .init(name: "YouTube", url: "https://m.youtube.com", tint: 0xFF0033),
     .init(name: "微博视频", url: "https://m.weibo.cn", tint: 0xE6162D),
-    .init(name: "抖音", url: "https://www.douyin.com", tint: 0x00F2EA),
     .init(name: "Pixiv", url: "https://www.pixiv.net", tint: 0x0096FA),
     .init(name: "Twitter", url: "https://mobile.twitter.com", tint: 0x1D9BF0),
     .init(name: "小红书", url: "https://www.xiaohongshu.com", tint: 0xFF2442),

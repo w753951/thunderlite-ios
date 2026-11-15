@@ -330,6 +330,24 @@ struct ExploreView: View {
           .padding(.vertical, 5)
         }
 
+        // 一键最高画质
+        if activeKind == .video, let best = store.bestVideo {
+          Button { downloadBest(best) } label: {
+            HStack(spacing: 4) {
+              Image(systemName: "arrow.down.to.line.compact")
+                .font(.system(size: 9, weight: .bold))
+              Text(best.quality.isEmpty ? "最高" : best.quality)
+                .font(.system(size: 9, weight: .bold))
+            }
+            .foregroundColor(Theme.bgDeep)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(Theme.accentGradient))
+          }
+          .buttonStyle(.plain)
+          .padding(.trailing, 4)
+        }
+
         Button { panelExpanded.toggle() } label: {
           Image(systemName: panelExpanded ? "chevron.down" : "chevron.up")
             .font(.system(size: 11, weight: .bold))
@@ -404,6 +422,20 @@ struct ExploreView: View {
             .lineLimit(1)
             .truncationMode(.middle)
           HStack(spacing: 5) {
+            // 清晰度徽章
+            if !item.quality.isEmpty && item.kind == .video {
+              Text(item.quality)
+                .font(.system(size: 8, weight: .bold))
+                .foregroundColor(item.isHighQuality ? Theme.accentWarm : Theme.textSecondary)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background(
+                  Capsule().fill(
+                    item.isHighQuality
+                      ? Theme.accentWarm.opacity(0.16)
+                      : Color.white.opacity(0.08))
+                )
+            }
             if let s = item.pixelSize {
               Text(s)
                 .font(.system(size: 9, design: .rounded))
@@ -439,6 +471,23 @@ struct ExploreView: View {
   }
 
   // MARK: 动作
+
+  /// 下载当前页面最高画质的那一条。
+  private func downloadBest(_ item: SniffedMedia) {
+    var headers: [String: String] = [:]
+    if let host = item.url.host {
+      if host.contains("bilibili") || host.contains("hdslb") {
+        headers["Referer"] = "https://www.bilibili.com/"
+      } else if host.contains("douyin") || host.contains("byteimg")
+                  || host.contains("douyinvod") {
+        headers["Referer"] = "https://www.douyin.com/"
+      }
+    }
+    try? DownloadEngine.shared.add(url: item.url.absoluteString,
+                                   saveTo: prefs.saveDirectory(),
+                                   threads: prefs.threads,
+                                   extraHeaders: headers)
+  }
 
   private func open(_ raw: String) {
     guard let u = URL(string: raw) else { return }
