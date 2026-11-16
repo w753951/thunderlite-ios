@@ -47,6 +47,9 @@ final class DownloadEngine: ObservableObject {
 
   private var running: [UUID: Task<Void, Never>] = [:]
 
+  /// 正在跑的 WKDownload 兜底下载器。任务结束前必须保住引用。
+  var webkitDownloaders: [UUID: WebKitDownloader] = [:]
+
   /// 惰性创建：TaskStore 是 MainActor 隔离的，不能出现在默认参数里。
   private lazy var store = TaskStore()
 
@@ -217,24 +220,23 @@ final class DownloadEngine: ObservableObject {
       task.resetSpeed()
       store.save(task)
     } catch {
-      // 403 常见原因是直链签名过期。自动去来源页抓一条新链再试一次。
-      if case EngineError.http(let code, _) = error, code == 403 || code == 401,
-         let origin = task.headers["Referer"] ?? task.headers["referer"],
-         let pageURL = URL(string: origin),
-         !task.retriedFreshLink {
-        task.retriedFreshLink = true
-        task.state = .waiting
-        task.errorText = "直链被拒，正在刷新链接…"
+      // 401/403 走 WKDownload：用它自己的网络栈带齐 Cookie/UA/Referer 再下一次。
+      // 这类 CDN 的签名直链用 URLSession 怎么补头都可能被拒，换会话最直接。
+      if case EngineError.http(let code, _) = error,
+         (code == 401 || code == 403),
+         !task.usedWebKitFallback {
+        task.usedWebKitFallback = true
+        task.state = .downloading
+        task.errorText = nil
         store.save(task)
 
-        let fresh = await FreshLinkBridge.shared.refresh(
-          pageURL: pageURL,
-          mediaHost: task.url.host)
-
-        if let fresh {
-          task.switchURL(fresh)
-          // 递归重跑一次（retriedFreshLink 已置位，不会无限循环）
-          await run(task)
+        let ok = await downloadViaWebKit(task)
+        if ok {
+          task.state = .done
+          task.finishedAt = Date()
+          task.resetSpeed()
+          try? FileManager.default.removeItem(at: task.stateURL)
+          store.save(task)
           return
         }
       }
@@ -243,6 +245,61 @@ final class DownloadEngine: ObservableObject {
       task.resetSpeed()
       task.errorText = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
       store.save(task)
+    }
+  }
+
+  /// 用 WKDownload 兜底下载。成功返回 true。
+  private func downloadViaWebKit(_ task: DownloadTask) async -> Bool {
+    // 文件名还没定就先猜一个
+    if task.fileName.isEmpty {
+      let last = task.url.lastPathComponent
+      task.fileName = last.isEmpty
+        ? "media-\(Int(Date().timeIntervalSince1970)).mp4"
+        : Self.sanitize(last)
+    }
+
+    let dest = task.fileURL
+    let referer = task.headers["Referer"] ?? task.headers["referer"]
+    let ua = task.headers["User-Agent"] ?? task.headers["user-agent"]
+
+    task.totalBytes = 0
+    task.receivedBytes = 0
+    task.resetSpeed()
+
+    // 每秒把 webkit 的进度转成界面要的 received/total
+    let engine = self
+
+    return await withCheckedContinuation { cont in
+      let dl = WebKitDownloader()
+      // 保住引用，否则中途被释放
+      engine.webkitDownloaders[task.id] = dl
+
+      dl.download(url: task.url,
+                  to: dest,
+                  referer: referer,
+                  userAgent: ua,
+                  timeout: 300,
+                  progress: { done, total in
+        task.receivedBytes = done
+        if total > 0 { task.totalBytes = total }
+        task.recordProgress()
+      },
+      completion: { outcome in
+        engine.webkitDownloaders.removeValue(forKey: task.id)
+        switch outcome {
+        case .success(let fileURL):
+          // 用一个假的 segment 记录，让进度条走满
+          task.receivedBytes = task.totalBytes > 0
+            ? task.totalBytes
+            : (Int64((try? FileManager.default.attributesOfItem(
+                atPath: fileURL.path)[.size] as? Int64) ?? 0))
+          task.totalBytes = max(task.totalBytes, task.receivedBytes)
+          cont.resume(returning: true)
+        case .failure(let err):
+          task.errorText = err.localizedDescription
+          cont.resume(returning: false)
+        }
+      })
     }
   }
 
@@ -255,8 +312,24 @@ final class DownloadEngine: ObservableObject {
     for (k, v) in task.headers { request.setValue(v, forHTTPHeaderField: k) }
     request.setValue("bytes=0-0", forHTTPHeaderField: "Range")
 
-    // 只要响应头，拿到就掐断正文，不会把整个文件拖下来。
-    let (bytes, response) = try await session.bytes(for: request)
+    // 外层再兜一个硬超时：有些 CDN 收到 Range 后既不回 206 也不结束连接，
+    // session.bytes(for:) 会一直挂着，任务就卡在「准备中 / 排队中 0 B」。
+    let (bytes, response) = try await withThrowingTaskGroup(
+      of: (URLSession.AsyncBytes, URLResponse).self
+    ) { group in
+      group.addTask {
+        try await self.session.bytes(for: request)
+      }
+      group.addTask {
+        try await Task.sleep(nanoseconds: UInt64(EngineLimits.probeTimeout * 1_000_000_000))
+        throw EngineError.http(-1, "探测超时（服务器没有在 \(Int(EngineLimits.probeTimeout)) 秒内响应）。")
+      }
+      guard let first = try await group.next() else {
+        throw EngineError.badResponse
+      }
+      group.cancelAll()
+      return first
+    }
     guard let http = response as? HTTPURLResponse else {
       bytes.task.cancel()
       throw EngineError.badResponse
@@ -536,6 +609,9 @@ final class DownloadTask: ObservableObject, Identifiable {
 
   /// 已经因为 403 重抓过一次直链。防止无限重试。
   var retriedFreshLink = false
+
+  /// 已经用过 WKDownload 兜底。只兜一次。
+  var usedWebKitFallback = false
 
   @Published var state: DownloadState = .waiting
   @Published var fileName: String = ""
