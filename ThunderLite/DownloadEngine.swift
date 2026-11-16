@@ -59,6 +59,15 @@ final class DownloadEngine: ObservableObject {
     config.requestCachePolicy = .reloadIgnoringLocalCacheData
     config.urlCache = nil
     config.httpShouldUsePipelining = false
+    // 别让 URLSession 自己加 Cookie：有些 CDN 看到系统 Cookie 反而拦。
+    // 需要的 Cookie 由 MediaRequestHeaders 显式放进去。
+    config.httpShouldSetCookies = false
+    config.httpCookieAcceptPolicy = .never
+    config.httpCookieStorage = nil
+    // 显式声明可接受的编码，避免某些 CDN 见到默认的 gzip 就返回 403。
+    config.httpAdditionalHeaders = [
+      "Accept-Encoding": "identity",
+    ]
     return URLSession(configuration: config)
   }()
 
@@ -88,12 +97,76 @@ final class DownloadEngine: ObservableObject {
                                          forceCookie: forceCookie)
     guard let target = URL(string: resolved.url) else { throw EngineError.badURL }
 
+    // 补默认请求头。
+    //
+    // URLSession 默认 UA 是 "ThunderLite/1 CFNetwork/... iOS 17.0"，
+    // 图片 CDN、视频 CDN 看到这个会直接 403 —— 它们在预览里能放（AVPlayer 走的是
+    // 系统播放器的 UA），但用引擎下就失败。这里统一补成 Safari 的 UA。
+    //
+    // Referer 也补一个：不少 CDN 校验来源站，没有就拒绝。
+    var headers = resolved.headers
+    if headers["User-Agent"] == nil, headers["user-agent"] == nil {
+      headers["User-Agent"] = Self.defaultUserAgent
+    }
+    if headers["Referer"] == nil, headers["referer"] == nil {
+      headers["Referer"] = Self.defaultReferer(for: target)
+    }
+    if headers["Accept"] == nil {
+      headers["Accept"] = "*/*"
+    }
+    if headers["Accept-Language"] == nil {
+      headers["Accept-Language"] = "zh-CN,zh;q=0.9,en;q=0.8"
+    }
+
     let task = DownloadTask(url: target, saveDir: directory,
-                            requestedThreads: threads, headers: resolved.headers,
+                            requestedThreads: threads, headers: headers,
                             site: resolved.site)
     tasks.insert(task, at: 0)
     start(task)
     return task
+  }
+
+  /// 通用 Safari UA。别改成 App 自己的标识，很多 CDN 会拦。
+  static let defaultUserAgent =
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) " +
+    "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+
+  /// 按目标域名猜一个 Referer。猜到就用域名本身，猜不到用它的根域。
+  static func defaultReferer(for url: URL) -> String {
+    guard let host = url.host?.lowercased() else { return "" }
+    // 已知站点用官网做 Referer（CDN 白名单里通常就是这些）
+    if host.contains("bilibili") || host.contains("hdslb")
+        || host.contains("bilivideo") {
+      return "https://www.bilibili.com/"
+    }
+    if host.contains("douyin") || host.contains("douyinvod")
+        || host.contains("byteimg") || host.contains("bytedance")
+        || host.contains("zjcdn") || host.contains("snssdk") {
+      return "https://www.douyin.com/"
+    }
+    if host.contains("weibo") || host.contains("sinaimg")
+        || host.contains("weibocdn") {
+      return "https://weibo.com/"
+    }
+    if host.contains("xiaohongshu") || host.contains("xhscdn") {
+      return "https://www.xiaohongshu.com/"
+    }
+    if host.contains("youtube") || host.contains("googlevideo") {
+      return "https://www.youtube.com/"
+    }
+    if host.contains("pixiv") || host.contains("pximg") {
+      return "https://www.pixiv.net/"
+    }
+    if host.contains("qq.com") || host.contains("gtimg") {
+      return "https://www.qq.com/"
+    }
+    // 通用兜底：https://<根域>/
+    let parts = host.split(separator: ".")
+    if parts.count >= 2 {
+      let root = parts.suffix(2).joined(separator: ".")
+      return "https://\(root)/"
+    }
+    return "https://\(host)/"
   }
 
   func start(_ task: DownloadTask) {
@@ -144,6 +217,28 @@ final class DownloadEngine: ObservableObject {
       task.resetSpeed()
       store.save(task)
     } catch {
+      // 403 常见原因是直链签名过期。自动去来源页抓一条新链再试一次。
+      if case EngineError.http(let code, _) = error, code == 403 || code == 401,
+         let origin = task.headers["Referer"] ?? task.headers["referer"],
+         let pageURL = URL(string: origin),
+         !task.retriedFreshLink {
+        task.retriedFreshLink = true
+        task.state = .waiting
+        task.errorText = "直链被拒，正在刷新链接…"
+        store.save(task)
+
+        let fresh = await FreshLinkBridge.shared.refresh(
+          pageURL: pageURL,
+          mediaHost: task.url.host)
+
+        if let fresh {
+          task.switchURL(fresh)
+          // 递归重跑一次（retriedFreshLink 已置位，不会无限循环）
+          await run(task)
+          return
+        }
+      }
+
       task.state = .failed
       task.resetSpeed()
       task.errorText = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -430,12 +525,17 @@ enum DownloadState: String, Codable {
 @MainActor
 final class DownloadTask: ObservableObject, Identifiable {
   let id = UUID()
-  let url: URL
+  /// 媒体直链。直链签名过期时会被 switchURL 换成新抓到的。
+  @Published private(set) var url: URL
   let saveDir: URL
   let requestedThreads: Int
-  let headers: [String: String]
+  /// 请求头。切链接时一起更新（Referer/Cookie 可能也要换）。
+  @Published private(set) var headers: [String: String]
   let site: NetdiskSite?
   let createdAt = Date()
+
+  /// 已经因为 403 重抓过一次直链。防止无限重试。
+  var retriedFreshLink = false
 
   @Published var state: DownloadState = .waiting
   @Published var fileName: String = ""
@@ -474,6 +574,22 @@ final class DownloadTask: ObservableObject, Identifiable {
     self.requestedThreads = requestedThreads
     self.headers = headers
     self.site = site
+  }
+
+  /// 直链过期时换成新地址，并重置进度（新链接的分段要重新规划）。
+  func switchURL(_ fresh: URL) {
+    guard fresh != url else { return }
+    url = fresh
+    // Referer/Cookie 保留，UA 保留；只换地址
+    // 进度和分段全部清掉：新链接的 Range 语义未必一致，不能沿用旧偏移
+    segments = []
+    receivedBytes = 0
+    totalBytes = 0
+    resumable = false
+    errorText = nil
+    resetSpeed()
+    // 旧的目标文件也删掉，避免把新数据写到旧文件的错误偏移上
+    try? FileManager.default.removeItem(at: fileURL)
   }
 
   var fileURL: URL { saveDir.appendingPathComponent(fileName.isEmpty ? "download" : fileName) }

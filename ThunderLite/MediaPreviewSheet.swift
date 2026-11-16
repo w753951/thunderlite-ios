@@ -295,24 +295,26 @@ struct MediaPreviewSheet: View {
   }
 
   private func addToDownloads() {
-    // 这些站点的 CDN 都校验 Referer，不带会 403
-    var headers: [String: String] = [:]
-    if let host = media.url.host {
-      if host.contains("bilibili") || host.contains("hdslb") {
-        headers["Referer"] = "https://www.bilibili.com/"
-      } else if host.contains("douyin") || host.contains("byteimg")
-                  || host.contains("douyinvod") {
-        headers["Referer"] = "https://www.douyin.com/"
+    // 后台线程拼请求头（要同步取 WebKit Cookie，不能占主线程）
+    added = true
+    let url = media.url
+    let dir = prefs.saveDirectory()
+    let threads = prefs.threads
+
+    DispatchQueue.global(qos: .userInitiated).async {
+      let headers = MediaRequestHeaders.build(for: url)
+      DispatchQueue.main.async {
+        do {
+          try engine.add(url: url.absoluteString,
+                         saveTo: dir,
+                         threads: threads,
+                         extraHeaders: headers)
+        } catch {
+          // 加入失败：把地址留在剪贴板，至少不丢
+          added = false
+          UIPasteboard.general.string = url.absoluteString
+        }
       }
-    }
-    do {
-      try engine.add(url: media.url.absoluteString,
-                     saveTo: prefs.saveDirectory(),
-                     threads: prefs.threads,
-                     extraHeaders: headers)
-      added = true
-    } catch {
-      UIPasteboard.general.string = media.url.absoluteString
     }
   }
 }
