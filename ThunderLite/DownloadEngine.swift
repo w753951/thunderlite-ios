@@ -322,34 +322,25 @@ final class DownloadEngine: ObservableObject {
 
   private func probe(_ task: DownloadTask) async throws {
     task.state = .probing
+    task.errorText = nil
+    store.save(task)
+
     var request = URLRequest(url: task.url, timeoutInterval: EngineLimits.probeTimeout)
     request.httpMethod = "GET"
     for (k, v) in task.headers { request.setValue(v, forHTTPHeaderField: k) }
+    // 只要头一个字节，拿响应头就够判断了
     request.setValue("bytes=0-0", forHTTPHeaderField: "Range")
 
-    // 外层再兜一个硬超时：有些 CDN 收到 Range 后既不回 206 也不结束连接，
-    // session.bytes(for:) 会一直挂着，任务就卡在「准备中 / 排队中 0 B」。
-    let (bytes, response) = try await withThrowingTaskGroup(
-      of: (URLSession.AsyncBytes, URLResponse).self
-    ) { group in
-      group.addTask {
-        try await self.session.bytes(for: request)
-      }
-      group.addTask {
-        try await Task.sleep(nanoseconds: UInt64(EngineLimits.probeTimeout * 1_000_000_000))
-        throw EngineError.http(-1, "探测超时（服务器没有在 \(Int(EngineLimits.probeTimeout)) 秒内响应）。")
-      }
-      guard let first = try await group.next() else {
-        throw EngineError.badResponse
-      }
-      group.cancelAll()
-      return first
-    }
+    // 用 data(for:) 而不是 bytes(for:)。
+    //
+    // bytes(for:) 是流式的，某些 CDN 收到 Range 后既不回 206 也不关连接，
+    // 流就永远挂着 —— 任务卡在「排队中 0 B」。data(for:) 会等到响应结束，
+    // 配合 timeoutInterval 有明确的失败点，不会无声挂死。
+    let (data, response) = try await session.data(for: request)
+
     guard let http = response as? HTTPURLResponse else {
-      bytes.task.cancel()
       throw EngineError.badResponse
     }
-    bytes.task.cancel()
 
     let status = http.statusCode
     guard status == 206 || status == 200 else {
@@ -359,7 +350,6 @@ final class DownloadEngine: ObservableObject {
     var total: Int64 = 0
     var supportsRange = false
     if status == 206 {
-      // Content-Range: bytes 0-0/12345
       if let cr = http.value(forHTTPHeaderField: "Content-Range"),
          let slash = cr.split(separator: "/").last, let n = Int64(slash) {
         total = n
@@ -371,12 +361,18 @@ final class DownloadEngine: ObservableObject {
       supportsRange = accept.lowercased().contains("bytes")
     }
 
-    guard total > 0 else { throw EngineError.unknownSize }
-
-    // 网盘把「要登录」返回成一个小网页（200 + text/html），不拦住会当成文件下下来。
-    let contentType = http.value(forHTTPHeaderField: "Content-Type") ?? ""
-    if contentType.lowercased().contains("text/html") && total < 2 * 1024 * 1024 {
+    // 内容太小的「文件」是错误页
+    let contentType = (http.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased()
+    if contentType.contains("text/html") && total < 2 * 1024 * 1024 {
       throw EngineError.htmlInsteadOfFile
+    }
+    if total > 0 && total < 4096 {
+      throw EngineError.http(status, "服务器只返回了 \(total) 字节，不是真正的文件。")
+    }
+
+    // 没给 Content-Length 但也拿不到总大小：当作不可续传，让单流模式去试
+    if total == 0 && !data.isEmpty && data.count <= 4096 {
+      throw EngineError.unknownSize
     }
 
     task.totalBytes = total
@@ -384,7 +380,9 @@ final class DownloadEngine: ObservableObject {
     if task.fileName.isEmpty {
       task.fileName = Self.fileName(from: http, url: task.url)
     }
-    try Self.ensureFile(task.fileURL, size: total)
+    if total > 0 {
+      try Self.ensureFile(task.fileURL, size: total)
+    }
     task.state = .waiting
     store.save(task)
   }
