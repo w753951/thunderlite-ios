@@ -44,9 +44,7 @@ jobs:
       - name: Build unsigned
         run: |
           set -o pipefail
-          log="$(mktemp)"
-          # 工程里已经写了 CODE_SIGNING_ALLOWED=NO；这里再从命令行压一遍，
-          # 免得 Xcode 版本差异又去找 Development Team（这坑踩过）。
+          log="$RUNNER_TEMP/build.log"
           xcodebuild \
             -project ThunderLite.xcodeproj \
             -scheme ThunderLite \
@@ -61,16 +59,26 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             EXPANDED_CODE_SIGN_IDENTITY="" \
             build >"$log" 2>&1 || {
-              echo "::group::xcodebuild failed"
-              grep -nE 'error:|Error:|\(\w+ error\)|The following build commands failed|ld:' "$log" | head -40 || true
+              echo "::group::xcodebuild errors"
+              grep -nE 'error:' "$log" | head -40 || true
               echo "::endgroup::"
-              tail -60 "$log"
+              tail -80 "$log"
               exit 1
             }
           grep -E 'warning:' "$log" | head -10 || true
           APP="build/Build/Products/Release-iphoneos/ThunderLite.app"
           test -d "$APP" || { echo "::error title=build::ThunderLite.app missing"; exit 1; }
           ls -la "$APP" | head
+
+      # 编译失败时保留日志，方便在 artifact 里直接看真实报错
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: ${{ runner.temp }}/build.log
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Package the ipa
         run: |
