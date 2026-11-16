@@ -392,7 +392,7 @@ struct SniffHomeSite: Identifiable {
 enum SniffHome {
   static let sites: [SniffHomeSite] = [
     .init(name: "Bilibili", url: "https://m.bilibili.com", tint: 0xFB7299),
-    .init(name: "抖音", url: "https://www.douyin.com", tint: 0x00F2EA),
+    .init(name: "抖音", url: "https://www.douyin.com/discover", tint: 0x00F2EA),
     .init(name: "YouTube", url: "https://m.youtube.com", tint: 0xFF0033),
     .init(name: "微博视频", url: "https://m.weibo.cn", tint: 0xE6162D),
     .init(name: "Pixiv", url: "https://www.pixiv.net", tint: 0x0096FA),

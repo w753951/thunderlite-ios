@@ -141,7 +141,10 @@ final class Prefs: ObservableObject {
     case "desktop":
       return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
     default:
-      return nil   // nil = 用系统默认（iPhone）
+      // 用桌面版 Chrome UA：
+      // 很多视频站（抖音、微博）对"看起来像手机 App 内嵌浏览器"的 UA 会
+      // 直接给一个空白页或强制跳 App。用桌面 UA 反而能拿到完整网页。
+      return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
   }
 

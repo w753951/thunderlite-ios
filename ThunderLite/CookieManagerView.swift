@@ -273,6 +273,7 @@ struct LoginBrowserSheet: View {
   @State private var canFwd = false
   @State private var command: BrowserCommand?
   @State private var cookieCount = 0
+  @State private var loadError: String?
 
   init(initialURL: String) {
     self.initialURL = initialURL
@@ -372,7 +373,8 @@ struct LoginBrowserSheet: View {
                        pageTitle: $title,
                        canGoBack: $canBack,
                        canGoForward: $canFwd,
-                       command: $command)
+                       command: $command,
+                       loadError: $loadError)
       }
     }
     .onAppear { cookeysRefresh() }

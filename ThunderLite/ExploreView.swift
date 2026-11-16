@@ -23,6 +23,7 @@ struct ExploreView: View {
   @State private var parsing = false
   @State private var parseMessage: String?
   @State private var errorText: String?
+  @State private var loadError: String?
 
   var body: some View {
     ZStack {
@@ -92,6 +93,8 @@ struct ExploreView: View {
           if showingHome {
             homePanel
               .transition(.opacity)
+          } else if loadError != nil {
+            loadErrorOverlay
           }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -238,11 +241,65 @@ struct ExploreView: View {
                    canGoBack: $canGoBack,
                    canGoForward: $canGoForward,
                    command: $command,
+                   loadError: $loadError,
                    adBlockEnabled: prefs.adBlockEnabled,
                    userAgent: prefs.emulatedUserAgent)
-      .id(prefs.adBlockVersion)   // 规则重编译后重建 webview
       .opacity(showingHome ? 0 : 1)
       .allowsHitTesting(!showingHome)
+  }
+
+  /// 加载失败时的浮层。
+  private var loadErrorOverlay: some View {
+    VStack(spacing: 14) {
+      Image(systemName: "wifi.exclamationmark")
+        .font(.system(size: 30, weight: .light))
+        .foregroundColor(Theme.accentWarm)
+
+      Text("页面打不开")
+        .font(.system(size: 15, weight: .semibold, design: .rounded))
+        .foregroundColor(Theme.textPrimary)
+
+      Text(loadError ?? "未知错误")
+        .font(.system(size: 12))
+        .foregroundColor(Theme.textSecondary)
+        .multilineTextAlignment(.center)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.horizontal, 32)
+
+      HStack(spacing: 10) {
+        Button {
+          loadError = nil
+          command = .reload
+        } label: {
+          Text("重试")
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundColor(Theme.bgDeep)
+            .padding(.horizontal, 22)
+            .padding(.vertical, 9)
+            .background(Capsule().fill(Theme.accentGradient))
+        }
+        .buttonStyle(.plain)
+
+        Button {
+          if let host = committedURL.host,
+             let u = URL(string: "https://\(host)") {
+            UIApplication.shared.open(u)
+          }
+        } label: {
+          Text("用 Safari 打开")
+            .font(.system(size: 13, weight: .medium))
+            .foregroundColor(Theme.textSecondary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 9)
+            .background(Capsule().fill(Color.white.opacity(0.07)))
+        }
+        .buttonStyle(.plain)
+      }
+      .padding(.top, 4)
+    }
+    .frame(maxWidth: .infinity)
+    .padding(.vertical, 28)
+    .background(Theme.bgElevated.opacity(0.96))
   }
 
   // MARK: 首页
