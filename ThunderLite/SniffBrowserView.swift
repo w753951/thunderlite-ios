@@ -65,6 +65,8 @@ struct SnifferWebView: UIViewRepresentable {
     }
 
     context.coordinator.observe(web)
+    // 让下载兜底逻辑能找到这个已经登录过站点的 webview
+    SharedWebView.shared.register(web)
     context.coordinator.load(url, in: web)
     return web
   }

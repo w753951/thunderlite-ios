@@ -40,6 +40,8 @@ struct SniffedMedia: Identifiable, Equatable {
   var bandwidth: Int = 0
   /// 文件大小（如果能从 Content-Length 拿到）。
   var byteSize: Int64 = 0
+  /// 这个直链已经被 CDN 拒绝过（多半签名过期）。界面标灰提醒。
+  var isStale: Bool = false
 
   static func == (a: SniffedMedia, b: SniffedMedia) -> Bool { a.url == b.url }
 
@@ -164,6 +166,12 @@ final class SnifferStore: ObservableObject {
     items.removeAll()
     seen.removeAll()
     sawVideoTag = false
+  }
+
+  /// 把一条地址标记为「已失效」，界面可以据此标灰。
+  func markStale(_ url: URL) {
+    guard let i = items.firstIndex(where: { $0.url == url }) else { return }
+    items[i].isStale = true
   }
 }
 

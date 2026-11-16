@@ -239,6 +239,27 @@ final class DownloadEngine: ObservableObject {
           store.save(task)
           return
         }
+
+        // WKDownload 也被拒：说明直链确实过期了，去来源页抓一条新的再试。
+        if !task.retriedFreshLink,
+           let origin = task.headers["Referer"] ?? task.headers["referer"],
+           let pageURL = URL(string: origin) {
+          task.retriedFreshLink = true
+          task.state = .waiting
+          task.errorText = "CDN 拒绝了直链，正在去原页面重新抓取…"
+          store.save(task)
+
+          let fresh = await LinkRefresherBridge.shared.refresh(
+            pageURL: pageURL,
+            preferHost: task.url.host)
+
+          if let fresh {
+            task.switchURL(fresh)
+            // 换链后重跑一次（两个标志位都已置位，不会循环）
+            await run(task)
+            return
+          }
+        }
       }
 
       task.state = .failed
@@ -266,40 +287,34 @@ final class DownloadEngine: ObservableObject {
     task.receivedBytes = 0
     task.resetSpeed()
 
-    // 每秒把 webkit 的进度转成界面要的 received/total
     let engine = self
 
     return await withCheckedContinuation { cont in
       let dl = WebKitDownloader()
-      // 保住引用，否则中途被释放
       engine.webkitDownloaders[task.id] = dl
 
       dl.download(url: task.url,
                   to: dest,
                   referer: referer,
                   userAgent: ua,
-                  timeout: 300,
-                  progress: { done, total in
+                  timeout: 300) { done, total in
         task.receivedBytes = done
         if total > 0 { task.totalBytes = total }
         task.recordProgress()
-      },
-      completion: { outcome in
+      } completion: { outcome in
         engine.webkitDownloaders.removeValue(forKey: task.id)
         switch outcome {
         case .success(let fileURL):
-          // 用一个假的 segment 记录，让进度条走满
-          task.receivedBytes = task.totalBytes > 0
-            ? task.totalBytes
-            : (Int64((try? FileManager.default.attributesOfItem(
-                atPath: fileURL.path)[.size] as? Int64) ?? 0))
-          task.totalBytes = max(task.totalBytes, task.receivedBytes)
+          let size = (try? FileManager.default
+            .attributesOfItem(atPath: fileURL.path)[.size] as? Int64) ?? 0
+          task.receivedBytes = size
+          task.totalBytes = size
           cont.resume(returning: true)
         case .failure(let err):
           task.errorText = err.localizedDescription
           cont.resume(returning: false)
         }
-      })
+      }
     }
   }
 

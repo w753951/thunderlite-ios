@@ -201,18 +201,60 @@ extension WebKitDownloader: WKDownloadDelegate {
                             suggestedFilename: String,
                             completionHandler: @escaping (URL?) -> Void) {
     Task { @MainActor in
+      // 关键：先看响应本身像不像媒体文件。
+      //
+      // CDN 拒绝时通常回一个很小的 JSON/HTML 错误体（100~500 字节），
+      // WKDownload 会老老实实把它存成 .mp4 —— 结果就是「下载成功但文件 150 字节」。
+      // 这里在落盘前就拦下来，把状态码和 MIME 报给上层。
+      if let http = response as? HTTPURLResponse {
+        let code = http.statusCode
+        let mime = (http.mimeType ?? "").lowercased()
+        let expected = max(response.expectedContentLength, 0)
+
+        let badStatus = !(200...299).contains(code)
+        let badMime = mime.hasPrefix("text/")
+          || mime.contains("json")
+          || mime.contains("html")
+          || mime.contains("xml")
+        // 小于 4KB 的「视频」一定是错误体：最短的有效 mp4 也远大于这个
+        let tooSmall = expected > 0 && expected < 4096
+
+        if badStatus || badMime || tooSmall {
+          completionHandler(nil)
+          let reason: String
+          if badStatus {
+            reason = "HTTP \(code)"
+          } else if badMime {
+            reason = "服务器返回的是 \(mime) 而不是媒体文件"
+          } else {
+            reason = "文件只有 \(expected) 字节，不是真正的视频"
+          }
+          self.failWith(NSError(
+            domain: "ThunderLite", code: code == 0 ? -1 : code,
+            userInfo: [NSLocalizedDescriptionKey:
+              "CDN 拒绝了这次请求（\(reason)），直链可能已过期。"]))
+          return
+        }
+      }
+
       guard let dest = self.destination else {
         completionHandler(nil)
         return
       }
-      // 用调用方指定的文件名，扩展名从 suggestedFilename 里补
       let fm = FileManager.default
       try? fm.createDirectory(at: dest.deletingLastPathComponent(),
                               withIntermediateDirectories: true)
-      // 已存在就删掉，WKDownload 不会覆盖
       try? fm.removeItem(at: dest)
       completionHandler(dest)
     }
+  }
+
+  /// 主动以失败收尾（decideDestination 里判定不合适时用）。
+  private func failWith(_ error: Error) {
+    if let d = download {
+      d.cancel { _ in }
+    }
+    finish(.failure(error))
   }
 
   nonisolated func downloadDidFinish(_ download: WKDownload) {
@@ -222,8 +264,54 @@ extension WebKitDownloader: WKDownloadDelegate {
           userInfo: [NSLocalizedDescriptionKey: "目标路径丢失。"])))
         return
       }
+
+      // 落盘后再查一次大小和文件头。
+      // 有些 CDN 不在响应头里给 Content-Length，decideDestination 拦不住，
+      // 只能等下完看实际内容。
+      let fm = FileManager.default
+      let size = (try? fm.attributesOfItem(atPath: dest.path)[.size] as? Int64) ?? 0
+
+      if size < 4096 {
+        try? fm.removeItem(at: dest)
+        self.finish(.failure(NSError(
+          domain: "ThunderLite", code: -2,
+          userInfo: [NSLocalizedDescriptionKey:
+            "下载到的内容只有 \(size) 字节，是 CDN 的错误响应而不是视频。直链已过期。"])))
+        return
+      }
+
+      // 认一下文件头：mp4 是 ftyp，webm 是 EBML(1A45DFA3)，flv 是 FLV
+      if let head = Self.readHead(dest, count: 16) {
+        let mp4 = head.count >= 12
+          && head[4] == 0x66 && head[5] == 0x74 && head[6] == 0x79 && head[7] == 0x70
+        let webm = head.count >= 4
+          && head[0] == 0x1A && head[1] == 0x45 && head[2] == 0xDF && head[3] == 0xA3
+        let flv = head.count >= 3
+          && head[0] == 0x46 && head[1] == 0x4C && head[2] == 0x56
+        let isMP3 = head.count >= 3
+          && head[0] == 0x49 && head[1] == 0x44 && head[2] == 0x33
+
+        if !(mp4 || webm || flv || isMP3) {
+          // 不是已知媒体格式：多半还是错误页
+          try? fm.removeItem(at: dest)
+          self.finish(.failure(NSError(
+            domain: "ThunderLite", code: -3,
+            userInfo: [NSLocalizedDescriptionKey:
+              "下载到的不是有效的媒体文件（文件头不匹配），直链已过期。"])))
+          return
+        }
+      }
+
       self.finish(.success(dest))
     }
+  }
+
+  /// 读文件前 N 个字节。
+  private static func readHead(_ url: URL, count: Int) -> [UInt8]? {
+    guard let fh = try? FileHandle(forReadingFrom: url) else { return nil }
+    defer { try? fh.close() }
+    guard let data = try? fh.read(upToCount: count) else { return nil }
+    return [UInt8](data)
   }
 
   nonisolated func download(_ download: WKDownload,
