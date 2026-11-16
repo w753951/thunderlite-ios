@@ -43,6 +43,15 @@ struct SniffedMedia: Identifiable, Equatable {
   /// 这个直链已经被 CDN 拒绝过（多半签名过期）。界面标灰提醒。
   var isStale: Bool = false
 
+  /// 直链剩余有效期（秒）。nil 表示 URL 里没有过期参数。
+  var remainingLife: TimeInterval? { LinkExpiry.remaining(url) }
+
+  /// 已经过期（含剩不到 3 秒）。
+  var isExpired: Bool { LinkExpiry.isExpired(url) }
+
+  /// 给界面看的有效期文案。
+  var lifeText: String? { LinkExpiry.describe(url) }
+
   static func == (a: SniffedMedia, b: SniffedMedia) -> Bool { a.url == b.url }
 
   /// 文件名，用于下载时落盘。

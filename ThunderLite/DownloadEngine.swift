@@ -50,6 +50,9 @@ final class DownloadEngine: ObservableObject {
   /// 正在跑的 WKDownload 兜底下载器。任务结束前必须保住引用。
   var webkitDownloaders: [UUID: WebKitDownloader] = [:]
 
+  /// 页面内 fetch 的实例。同样要保住引用。
+  var pageFetchers: [UUID: WebViewFetcher] = [:]
+
   /// 惰性创建：TaskStore 是 MainActor 隔离的，不能出现在默认参数里。
   private lazy var store = TaskStore()
 
@@ -206,6 +209,12 @@ final class DownloadEngine: ObservableObject {
 
   private func run(_ task: DownloadTask) async {
     do {
+      // 短时效签名的直链（抖音/西瓜/字节系）只有几十秒有效期，
+      // 用独立 URLSession 请求几乎必然 403。优先走页面内 fetch。
+      if LinkExpiry.remaining(task.url) != nil {
+        if await downloadInPage(task) { return }
+      }
+
       try await probe(task)
       guard task.state != .paused else { return }
       try await download(task)
@@ -267,6 +276,67 @@ final class DownloadEngine: ObservableObject {
       task.errorText = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
       store.save(task)
     }
+  }
+
+  /// 用探索页那个已加载来源站点的 WebView，在页面内 fetch 取字节。
+  ///
+  /// 成功返回 true，任务状态也会一并置为 done。
+  private func downloadInPage(_ task: DownloadTask) async -> Bool {
+    guard let web = SharedWebView.shared.live else {
+      task.errorText = "需要先在探索页打开视频页面，才能用页面会话下载。"
+      return false
+    }
+
+    if task.fileName.isEmpty {
+      let last = task.url.lastPathComponent
+      task.fileName = last.isEmpty
+        ? "media-\(Int(Date().timeIntervalSince1970)).mp4"
+        : Self.sanitize(last)
+    }
+
+    task.state = .downloading
+    task.receivedBytes = 0
+    task.totalBytes = 0
+    task.errorText = nil
+    task.resetSpeed()
+    store.save(task)
+
+    let dest = task.fileURL
+    let fetcher = WebViewFetcher()
+    pageFetchers[task.id] = fetcher
+
+    let ok: Bool = await withCheckedContinuation { cont in
+      fetcher.fetch(using: web, url: task.url, to: dest, progress: { got, total in
+        task.receivedBytes = got
+        if total > 0 { task.totalBytes = total }
+        task.recordProgress()
+      }, completion: { result in
+        switch result {
+        case .success:
+          cont.resume(returning: true)
+        case .failure(let err):
+          task.errorText = (err as? LocalizedError)?.errorDescription
+            ?? err.localizedDescription
+          cont.resume(returning: false)
+        }
+      })
+    }
+
+    pageFetchers.removeValue(forKey: task.id)
+
+    if ok {
+      let size = (try? FileManager.default
+        .attributesOfItem(atPath: dest.path)[.size] as? Int64) ?? 0
+      task.receivedBytes = size
+      task.totalBytes = size
+      task.state = .done
+      task.finishedAt = Date()
+      task.resetSpeed()
+      try? FileManager.default.removeItem(at: task.stateURL)
+      store.save(task)
+      return true
+    }
+    return false
   }
 
   /// 用 WKDownload 兜底下载。成功返回 true。

@@ -178,6 +178,12 @@ struct MediaPreviewSheet: View {
           chip(media.quality,
                media.isHighQuality ? Theme.accentWarm : Theme.accentAlt)
         }
+        if let life = media.lifeText {
+          chip(life, media.isExpired
+               ? Color(hex: 0xFF5E6E)
+               : (media.remainingLife ?? 0) < 60
+                 ? Theme.accentWarm : Color(hex: 0x35E08A))
+        }
         if let size = media.pixelSize {
           chip(size, Theme.accentAlt)
         }
