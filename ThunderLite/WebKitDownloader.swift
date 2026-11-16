@@ -90,7 +90,7 @@ final class WebKitDownloader: NSObject, ObservableObject {
   /// 取消正在进行的下载。
   func cancel() {
     if finished { return }
-    download?.cancel { }
+    download?.cancel { _ in }
     finish(.failure(NSError(
       domain: "ThunderLite", code: -999,
       userInfo: [NSLocalizedDescriptionKey: "已取消。"])))
