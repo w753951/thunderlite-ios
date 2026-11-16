@@ -14,6 +14,7 @@ struct MediaPreviewSheet: View {
   @State private var player: AVPlayer?
   @State private var loadFailed = false
   @State private var added = false
+  @State private var showingDiagnostics = false
 
   var body: some View {
     ZStack {
@@ -28,6 +29,9 @@ struct MediaPreviewSheet: View {
       }
     }
     .onAppear { prepare() }
+    .sheet(isPresented: $showingDiagnostics) {
+      MediaDiagnosticsSheet(media: media)
+    }
     .onDisappear { player?.pause() }
   }
 
@@ -241,7 +245,10 @@ struct MediaPreviewSheet: View {
         smallButton("复制链接", "link") {
           UIPasteboard.general.string = media.url.absoluteString
         }
-        smallButton("用 Safari 打开", "safari") {
+        smallButton("诊断", "stethoscope") {
+          showingDiagnostics = true
+        }
+        smallButton("Safari", "safari") {
           UIApplication.shared.open(media.url)
         }
       }

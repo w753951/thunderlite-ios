@@ -37,6 +37,7 @@
 		AA0000000000000000F0013 /* FreshLinkResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000A0013 /* FreshLinkResolver.swift */; };
 		AA0000000000000000B991 /* WebKitDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000C991 /* WebKitDownloader.swift */; };
 		AA0000000000000000B992 /* LinkRefresher.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000C992 /* LinkRefresher.swift */; };
+		AA0000000000000000B993 /* MediaDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000C993 /* MediaDiagnostics.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -72,6 +73,7 @@
 		AA0000000000000000A0013 /* FreshLinkResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FreshLinkResolver.swift; sourceTree = "<group>"; };
 		AA0000000000000000C991 /* WebKitDownloader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebKitDownloader.swift; sourceTree = "<group>"; };
 		AA0000000000000000C992 /* LinkRefresher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkRefresher.swift; sourceTree = "<group>"; };
+		AA0000000000000000C993 /* MediaDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaDiagnostics.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -104,6 +106,7 @@
 				AA00000000000000000016 /* Prefs.swift */,
 				AA00000000000000000017 /* Assets.xcassets */,
 				AA00000000000000000018 /* Info.plist */,
+				AA0000000000000000C993 /* MediaDiagnostics.swift */,
 				AA0000000000000000C992 /* LinkRefresher.swift */,
 				AA0000000000000000C991 /* WebKitDownloader.swift */,
 				AA0000000000000000A0003 /* MediaRequestHeaders.swift */,
@@ -222,6 +225,7 @@
 				AA00000000000000000004 /* DownloadEngine.swift in Sources */,
 				AA00000000000000000005 /* NetdiskSupport.swift in Sources */,
 				AA00000000000000000006 /* Prefs.swift in Sources */,
+				AA0000000000000000B993 /* MediaDiagnostics.swift in Sources */,
 				AA0000000000000000B992 /* LinkRefresher.swift in Sources */,
 				AA0000000000000000B991 /* WebKitDownloader.swift in Sources */,
 				AA0000000000000000F0003 /* MediaRequestHeaders.swift in Sources */,
