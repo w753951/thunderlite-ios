@@ -114,7 +114,7 @@ enum BilibiliResolver {
 
     // 已经是 bilibili.com/video/BV... 就直接用
     if let id = videoID(from: url), url.host?.contains("bilibili") == true {
-      fetchPlayInfo(id: id, pageURL: url, completion: completion)
+      fetchPlayInfo(id, pageURL: url, completion: completion)
       return
     }
 
@@ -125,7 +125,7 @@ enum BilibiliResolver {
         return
       }
       if let id = videoID(from: final) {
-        fetchPlayInfo(id: id, pageURL: final, completion: completion)
+        fetchPlayInfo(id, pageURL: final, completion: completion)
       } else {
         // 展开后还是没有 ID：直接扒页面
         scrapePage(final, completion: completion)

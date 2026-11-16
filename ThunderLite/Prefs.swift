@@ -123,7 +123,7 @@ final class Prefs: ObservableObject {
 
   private func rebuildAdBlock() {
     guard adBlockEnabled else {
-      AdBlocker.cachedList = nil
+      AdBlocker.clearCache()
       adBlockVersion += 1
       return
     }

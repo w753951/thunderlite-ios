@@ -105,7 +105,12 @@ enum AdBlocker {
   }
 
   /// 编译好的规则缓存，供 webview 配置使用。
-  private(set) static var cachedList: WKContentRuleList?
+  static var cachedList: WKContentRuleList?
+
+  /// 清掉缓存的规则（关掉拦截时用）。
+  static func clearCache() {
+    cachedList = nil
+  }
 
   /// 页面内兜底脚本：干掉常见广告浮层、拦截 window.open 弹窗。
   static let pageScript = #"""
