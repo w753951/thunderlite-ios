@@ -121,6 +121,14 @@ final class SnifferStore: ObservableObject {
     items.filter { $0.kind == kind }
   }
 
+  /// 直接塞一条结果（不走 JS 回调）。用于原生侧解析出来的媒体。
+  func ingestPreview(_ media: SniffedMedia) {
+    let key = media.url.absoluteString
+    guard !seen.contains(key) else { return }
+    seen.insert(key)
+    items.insert(media, at: 0)
+  }
+
   func count(of kind: MediaKind) -> Int {
     items.reduce(0) { $0 + ($1.kind == kind ? 1 : 0) }
   }

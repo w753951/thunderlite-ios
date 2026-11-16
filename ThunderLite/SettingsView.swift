@@ -32,6 +32,12 @@ struct SettingsView: View {
     .sheet(item: $editingSite) { site in
       CookieSheet(site: site).environmentObject(prefs)
     }
+    .onAppear {
+      // 让「清理缓存」入口显示当前占用
+      if CacheCleaner.shared.items.isEmpty {
+        CacheCleaner.shared.scan()
+      }
+    }
   }
 
   // MARK: 顶栏
@@ -114,6 +120,31 @@ struct SettingsView: View {
             .font(.system(size: 15, weight: .medium))
             .foregroundColor(Theme.textPrimary)
           Spacer()
+          Image(systemName: "chevron.right")
+            .font(.system(size: 11, weight: .bold))
+            .foregroundColor(Theme.textTertiary)
+        }
+        .padding(15)
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+
+      divider
+
+      NavigationLink { CacheCleanerView() } label: {
+        HStack(spacing: 12) {
+          Image(systemName: "trash.fill")
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundColor(Theme.accent)
+            .frame(width: 26)
+          Text("清理缓存")
+            .font(.system(size: 15, weight: .medium))
+            .foregroundColor(Theme.textPrimary)
+          Spacer()
+          Text(CacheCleaner.sizeText(CacheCleaner.shared.totalBytes))
+            .font(.system(size: 12, weight: .semibold, design: .rounded))
+            .monospacedDigit()
+            .foregroundColor(Theme.textTertiary)
           Image(systemName: "chevron.right")
             .font(.system(size: 11, weight: .bold))
             .foregroundColor(Theme.textTertiary)

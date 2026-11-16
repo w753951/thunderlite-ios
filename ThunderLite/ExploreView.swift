@@ -20,6 +20,9 @@ struct ExploreView: View {
   @State private var activeKind: MediaKind = .video
   @State private var previewItem: SniffedMedia?
   @State private var panelExpanded = true
+  @State private var parsing = false
+  @State private var parseMessage: String?
+  @State private var errorText: String?
 
   var body: some View {
     ZStack {
@@ -32,6 +35,55 @@ struct ExploreView: View {
             .progressViewStyle(.linear)
             .tint(Theme.accent)
             .scaleEffect(x: 1, y: 0.6, anchor: .center)
+        }
+
+        // 解析状态 / 错误提示
+        if parsing {
+          HStack(spacing: 8) {
+            ProgressView().tint(Theme.accent).scaleEffect(0.7)
+            Text(parseMessage ?? "正在解析…")
+              .font(.system(size: 11))
+              .foregroundColor(Theme.accent)
+            Spacer()
+          }
+          .padding(.horizontal, 16)
+          .padding(.vertical, 8)
+          .background(Theme.accent.opacity(0.09))
+        } else if let msg = parseMessage {
+          HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+              .font(.system(size: 11))
+            Text(msg)
+              .font(.system(size: 11))
+            Spacer()
+            Button { parseMessage = nil } label: {
+              Image(systemName: "xmark")
+                .font(.system(size: 9, weight: .bold))
+            }
+          }
+          .foregroundColor(Color(hex: 0x35E08A))
+          .padding(.horizontal, 16)
+          .padding(.vertical, 8)
+          .background(Color(hex: 0x35E08A).opacity(0.09))
+        }
+
+        if let err = errorText {
+          HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+              .font(.system(size: 11))
+            Text(err)
+              .font(.system(size: 11))
+              .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            Button { errorText = nil } label: {
+              Image(systemName: "xmark")
+                .font(.system(size: 9, weight: .bold))
+            }
+          }
+          .foregroundColor(Theme.accentWarm)
+          .padding(.horizontal, 16)
+          .padding(.vertical, 8)
+          .background(Theme.accentWarm.opacity(0.09))
         }
 
         ZStack {
@@ -498,27 +550,93 @@ struct ExploreView: View {
   }
 
   private func navigate() {
-    var text = addressText.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !text.isEmpty else { return }
+    let raw = addressText.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !raw.isEmpty else { return }
 
-    // 没写协议就补上；看着不像域名就走必应搜索
-    if !text.lowercased().hasPrefix("http://") && !text.lowercased().hasPrefix("https://") {
-      if text.contains(".") && !text.contains(" ") {
-        text = "https://" + text
-      } else if let q = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-                let u = URL(string: "https://www.bing.com/search?q=" + q) {
-        committedURL = u
-        showingHome = false
-        store.reset()
-        return
-      } else {
+    // 先用分享文本解析器抠链接：粘贴抖音/哔哩哔哩的整段分享文案时，
+    // 直接拿这段文字去搜索是搜不出东西的，必须先提取真实 URL。
+    if let found = ShareTextParser.extractURL(from: raw) {
+      // 抖音 / B 站：直接解析出媒体，不走网页
+      let site = VideoPageResolver.site(for: found)
+      if site == .douyin || site == .bilibili {
+        resolveAndDownload(from: raw, site: site)
         return
       }
+      addressText = found.absoluteString
+      committedURL = found
+      showingHome = false
+      store.reset()
+      return
     }
 
-    guard let u = URL(string: text) else { return }
-    committedURL = u
-    showingHome = false
-    store.reset()
+    // 没有链接：纯文字搜索
+    if let q = raw.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+       let u = URL(string: "https://www.bing.com/search?q=" + q) {
+      addressText = u.absoluteString
+      committedURL = u
+      showingHome = false
+      store.reset()
+    }
+  }
+
+  /// 地址栏里直接解析抖音 / B 站并加进下载队列。
+  private func resolveAndDownload(from text: String,
+                                  site: VideoPageResolver.Site) {
+    parsing = true
+    parseMessage = "正在解析\(site == .bilibili ? "哔哩哔哩" : "抖音")…"
+    errorText = nil
+
+    VideoPageResolver.resolve(from: text) { result in
+      Task { @MainActor in
+        parsing = false
+        switch result {
+        case .success(let bundle):
+          var headers: [String: String] = [:]
+          headers["Referer"] = site == .bilibili
+            ? "https://www.bilibili.com/"
+            : "https://www.douyin.com/"
+
+          var added = 0
+          for u in bundle.videos.prefix(4) {
+            let kind: MediaKind = u.path.lowercased().hasSuffix(".m4a")
+              || u.path.lowercased().hasSuffix(".mp3") ? .audio : .video
+            var m = SniffedMedia(url: u, kind: kind)
+            m.quality = kind == .audio ? "音轨" : "最高"
+            store.ingestPreview(m)
+            if (try? DownloadEngine.shared.add(url: u.absoluteString,
+                                               saveTo: prefs.saveDirectory(),
+                                               threads: prefs.threads,
+                                               extraHeaders: headers)) != nil {
+              added += 1
+            }
+          }
+          for u in bundle.images.prefix(30) {
+            let m = SniffedMedia(url: u, kind: .image)
+            store.ingestPreview(m)
+            if (try? DownloadEngine.shared.add(url: u.absoluteString,
+                                               saveTo: prefs.saveDirectory(),
+                                               threads: 8,
+                                               extraHeaders: headers)) != nil {
+              added += 1
+            }
+          }
+
+          if added > 0 {
+            parseMessage = "已加入 \(added) 个下载任务，可以在「下载」里看进度"
+            // 把面板切到视频并展开，让解析结果立刻可见
+            activeKind = bundle.videos.isEmpty ? .image : .video
+            panelExpanded = true
+            showingHome = false
+            addressText = bundle.title
+          } else {
+            errorText = "解析到了内容但没能加入下载队列。"
+          }
+        case .failure(let err):
+          errorText = (err as? LocalizedError)?.errorDescription
+            ?? err.localizedDescription
+          parseMessage = nil
+        }
+      }
+    }
   }
 }
