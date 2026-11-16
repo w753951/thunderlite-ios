@@ -53,6 +53,9 @@ final class DownloadEngine: ObservableObject {
   /// 页面内 fetch 的实例。同样要保住引用。
   var pageFetchers: [UUID: WebViewFetcher] = [:]
 
+  /// 媒体栈下载器实例。
+  var mediaStackDownloaders: [UUID: MediaStackDownloader] = [:]
+
   /// 惰性创建：TaskStore 是 MainActor 隔离的，不能出现在默认参数里。
   private lazy var store = TaskStore()
 
@@ -209,8 +212,14 @@ final class DownloadEngine: ObservableObject {
 
   private func run(_ task: DownloadTask) async {
     do {
-      // 短时效签名的直链（抖音/西瓜/字节系）只有几十秒有效期，
-      // 用独立 URLSession 请求几乎必然 403。优先走页面内 fetch。
+      // 第一优先：走系统媒体栈（AVFoundation）。
+      //
+      // 依据是「预览能播放」—— 那说明 AVPlayer 用同一个 URL 能拿到数据。
+      // CDN 期望的元信息、TLS 会话、Range 策略都由系统媒体栈自己生成，
+      // URLSession 怎么补头都凑不出来。
+      if await downloadViaMediaStack(task) { return }
+
+      // 第二优先：短时效签名的直链在页面内 fetch
       if LinkExpiry.remaining(task.url) != nil {
         if await downloadInPage(task) { return }
       }
@@ -275,6 +284,79 @@ final class DownloadEngine: ObservableObject {
       task.resetSpeed()
       task.errorText = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
       store.save(task)
+    }
+  }
+
+  /// 用系统媒体栈（AVFoundation）下载。成功返回 true。
+  ///
+  /// 这是对付「字节系 CDN 只认播放器」最有效的一招：
+  /// 预览能播 = AVPlayer 能拉流 = AVAssetExportSession 也能拉。
+  private func downloadViaMediaStack(_ task: DownloadTask) async -> Bool {
+    // 只对视频类地址尝试，图片/音频小文件继续走原路径
+    let host = task.url.host?.lowercased() ?? ""
+    let looksVideo = task.url.path.lowercased().hasSuffix(".mp4")
+      || task.url.path.lowercased().hasSuffix(".m4v")
+      || task.url.path.lowercased().hasSuffix(".mov")
+      || task.url.path.lowercased().hasSuffix(".m3u8")
+      || host.contains("mountaintoy")
+      || host.contains("douyinvod")
+      || host.contains("byteimg")
+      || host.contains("zjcdn")
+      || host.contains("snssdk")
+      || host.contains("hdslb")
+      || host.contains("bilivideo")
+    guard looksVideo else { return false }
+
+    if task.fileName.isEmpty {
+      let last = task.url.lastPathComponent
+      task.fileName = last.isEmpty
+        ? "media-\(Int(Date().timeIntervalSince1970)).mp4"
+        : Self.sanitize(last)
+    }
+    // 确保扩展名是媒体栈认识的容器
+    if (task.fileName as NSString).pathExtension.isEmpty {
+      task.fileName += ".mp4"
+    }
+
+    task.state = .downloading
+    task.receivedBytes = 0
+    task.totalBytes = 0
+    task.errorText = nil
+    task.resetSpeed()
+    store.save(task)
+
+    let dest = task.fileURL
+    let dl = MediaStackDownloader()
+    mediaStackDownloaders[task.id] = dl
+
+    let result: Result<URL, Error> = await withCheckedContinuation { cont in
+      dl.download(url: task.url, to: dest, headers: task.headers, progress: { f in
+        // 媒体栈只给 0...1 的进度；界面用它驱动进度条
+        task.mediaStackFraction = f
+        task.recordProgress()
+      }, completion: { r in
+        cont.resume(returning: r)
+      })
+    }
+
+    mediaStackDownloaders.removeValue(forKey: task.id)
+
+    switch result {
+    case .success(let fileURL):
+      let size = (try? FileManager.default
+        .attributesOfItem(atPath: fileURL.path)[.size] as? Int64) ?? 0
+      task.receivedBytes = size
+      task.totalBytes = size
+      task.state = .done
+      task.finishedAt = Date()
+      task.resetSpeed()
+      try? FileManager.default.removeItem(at: task.stateURL)
+      store.save(task)
+      return true
+    case .failure(let err):
+      task.errorText = (err as? LocalizedError)?.errorDescription
+        ?? err.localizedDescription
+      return false
     }
   }
 
@@ -696,6 +778,10 @@ final class DownloadTask: ObservableObject, Identifiable {
   /// 已经用过 WKDownload 兜底。只兜一次。
   var usedWebKitFallback = false
 
+  /// 媒体栈（AVAssetExportSession）给的 0...1 进度。
+  /// 这条路径拿不到字节数，只能用比例驱动进度条。
+  @Published var mediaStackFraction: Double = 0
+
   @Published var state: DownloadState = .waiting
   @Published var fileName: String = ""
   @Published var totalBytes: Int64 = 0
@@ -755,6 +841,10 @@ final class DownloadTask: ObservableObject, Identifiable {
   var stateURL: URL { saveDir.appendingPathComponent(".thunderlite-\(id.uuidString).json") }
 
   var progress: Double {
+    // 媒体栈路径拿不到字节数，用它给的比例
+    if totalBytes <= 0 && mediaStackFraction > 0 {
+      return min(1, mediaStackFraction)
+    }
     guard totalBytes > 0 else { return 0 }
     return min(1, Double(receivedBytes) / Double(totalBytes))
   }
