@@ -17,23 +17,48 @@ enum ShareTextParser {
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return nil }
 
-    // 1) 先把带 http(s):// 的挑出来
-    if let r = trimmed.range(of: #"https?://[^\s\u{3000}，,。；;"'<>【】（）()]+"#,
+    // 0) 整段文本本身就是一条链接（粘贴直链最常见的情况）。
+    //    先原样试，再按「去掉换行后」试，最后再 percent-encode 兜底。
+    if let u = urlFromWholeText(trimmed) { return u }
+
+    // 1) 文本里混着一堆噪音，把带 http(s):// 的那段挑出来。
+    //    这里的排除集只挡空白、中文句读和括号尖括号，
+    //    `"` `;` `=` `%` `+` 在 query 里都是合法字符，不能挡。
+    if let r = trimmed.range(of: #"https?://[^\s\u{3000}，。；、！？【】《》（）()<>\u{201C}\u{201D}]+"#,
                              options: .regularExpression) {
-      var raw = String(trimmed[r])
-      // 去掉尾部的标点，这些经常被中文句读粘上来
-      raw = raw.trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?、。，；：！？)]}>\"'"))
-      if let u = URL(string: raw) { return u }
+      if let u = urlFromRaw(String(trimmed[r])) { return u }
     }
 
     // 2) 没有协议：找形如 xxx.yy/zzz 的 token
-    if let r = trimmed.range(of: #"[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]{2,}(/[^\s\u{3000}，,。；;]*)?[^\s\u{3000}，,。；;]*"#,
+    if let r = trimmed.range(of: #"[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]{2,}(/[^\s\u{3000}，。；、！？【】《》（）()<>]*)?[^\s\u{3000}，。；、！？【】《》（）()<>]*"#,
                              options: .regularExpression) {
-      var raw = String(trimmed[r])
-      raw = raw.trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?、。，；：！？)]}>\"'"))
-      if let u = URL(string: "https://" + raw) { return u }
+      let raw = String(trimmed[r])
+      if let u = urlFromRaw("https://" + raw) { return u }
     }
 
+    return nil
+  }
+
+  /// 把一段候选文本变成 URL：先直连，再 percent-encode，再走 URLComponents。
+  private static func urlFromRaw(_ candidate: String) -> URL? {
+    let s = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !s.isEmpty else { return nil }
+    if let u = URL(string: s) { return u }
+    if let enc = s.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+       let u = URL(string: enc) { return u }
+    if let u = URLComponents(string: s)?.url { return u }
+    return nil
+  }
+
+  /// 整段文本当作一条链接来试；含空白时把空白剥掉再试一次。
+  private static func urlFromWholeText(_ text: String) -> URL? {
+    guard text.lowercased().hasPrefix("http://") || text.lowercased().hasPrefix("https://") else {
+      return nil
+    }
+    if let u = urlFromRaw(text) { return u }
+    // 换行 / 空格是复制粘贴时最容易带进来的东西，剥掉再试。
+    let stripped = text.components(separatedBy: .whitespacesAndNewlines).joined()
+    if stripped != text, let u = urlFromRaw(stripped) { return u }
     return nil
   }
 
